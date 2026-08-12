@@ -1,0 +1,68 @@
+rules_version = '2';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Meridian — Firestore security rules
+//
+// Deploy with:  firebase deploy --only firestore:rules
+// (or paste into Firebase console → Firestore → Rules)
+//
+// The data model is one document per user holding watchlist, positions, alerts
+// and preferences. There is no shared or public collection, which makes the
+// rules simple and the blast radius of a mistake exactly one account.
+//
+// The default deny at the bottom is load-bearing: any collection added later
+// is locked until someone writes a rule for it, rather than inheriting access
+// by accident.
+// ─────────────────────────────────────────────────────────────────────────────
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Cheap structural checks. These are not validation in the application
+    // sense — the client already coerces shape on read — but they stop a
+    // compromised or scripted client from writing unbounded blobs into a
+    // document that is billed by size and read on every page load.
+    function withinSizeLimits() {
+      let d = request.resource.data;
+      return (!('watchlist' in d) || d.watchlist.size() <= 200)
+          && (!('positions' in d) || d.positions.size() <= 300)
+          && (!('alerts' in d)    || d.alerts.size()    <= 200);
+    }
+
+    function hasExpectedTypes() {
+      let d = request.resource.data;
+      return (!('watchlist' in d)   || d.watchlist is list)
+          && (!('positions' in d)   || d.positions is list)
+          && (!('alerts' in d)      || d.alerts is list)
+          && (!('preferences' in d) || d.preferences is map);
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+
+      allow create, update: if isOwner(userId)
+                            && withinSizeLimits()
+                            && hasExpectedTypes();
+
+      allow delete: if isOwner(userId);
+
+      // Reserved for future per-user subcollections; locked until one exists.
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    // Default deny.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
