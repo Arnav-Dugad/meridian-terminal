@@ -30,6 +30,7 @@ interface ProbeResult {
   envVar: string | null;
   coverage: string[];
   budget: { minute: number | null; day: number | null };
+  circuit?: { state: "closed" | "open" | "half-open"; retryInSeconds: number };
 }
 
 interface Payload {
@@ -43,11 +44,21 @@ export function DiagnosticsView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const run = useCallback(async () => {
+  /**
+   * `reset` clears the circuit breakers before probing.
+   *
+   * That is the right default for a button a person pressed: they want to know
+   * whether the provider is up *now*, not whether it was down two minutes ago.
+   * Passing `reset=0` observes the breakers instead, which is what the initial
+   * page load does so the view reflects the state the app is really in.
+   */
+  const run = useCallback(async (reset: boolean) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/diagnostics", { cache: "no-store" });
+      const res = await fetch(`/api/diagnostics?reset=${reset ? "1" : "0"}`, {
+        cache: "no-store",
+      });
       if (!res.ok) throw new Error(`Diagnostics returned ${res.status}`);
       setData((await res.json()) as Payload);
     } catch (err) {
@@ -58,7 +69,9 @@ export function DiagnosticsView() {
   }, []);
 
   useEffect(() => {
-    void run();
+    // Observe on load, so the page shows the real state rather than a state it
+    // just created by clearing the breakers.
+    void run(false);
   }, [run]);
 
   const summary = data?.summary;
@@ -80,8 +93,14 @@ export function DiagnosticsView() {
           )
         }
         actions={
-          <Button variant="primary" size="md" icon={<IconRefresh />} onClick={run} loading={loading}>
-            Re-run probes
+          <Button
+            variant="primary"
+            size="md"
+            icon={<IconRefresh />}
+            onClick={() => run(true)}
+            loading={loading}
+          >
+            Retry all now
           </Button>
         }
       />
@@ -167,6 +186,27 @@ export function DiagnosticsView() {
                         <p className="num-mono mt-1 text-[12px] text-ivory-60">
                           {r.latencyMs != null ? `${r.latencyMs} ms` : "—"}
                         </p>
+
+                        {/*
+                          A paused provider is being skipped without a request.
+                          Saying so — and offering a way past the wait — is the
+                          difference between "broken" and "recovering".
+                        */}
+                        {r.circuit && r.circuit.state !== "closed" && (
+                          <span className="mt-1.5 flex items-center justify-end gap-2">
+                            <Badge tone="signal">
+                              {r.circuit.state === "open"
+                                ? `paused ${r.circuit.retryInSeconds}s`
+                                : "testing"}
+                            </Badge>
+                            <button
+                              onClick={() => run(true)}
+                              className="label-micro-tight rounded-[3px] border border-line px-1.5 py-1 text-ivory-60 transition-colors hover:border-signal/40 hover:text-signal"
+                            >
+                              retry now
+                            </button>
+                          </span>
+                        )}
                         {(r.budget.minute != null || r.budget.day != null) && r.status !== "not-configured" && (
                           <p className="num-mono mt-1 text-[10px] text-ivory-40">
                             {r.budget.minute != null && `${r.budget.minute}/min`}

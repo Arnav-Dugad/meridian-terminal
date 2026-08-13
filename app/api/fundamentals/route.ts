@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { getEarnings, getFundamentals, getPeers, getRecommendations } from "@/lib/twelvedata/service";
 import { findBySlug } from "@/lib/market/universe";
+import { fetchOwnershipAndRatings } from "@/lib/providers/yahoo-summary";
 
 export const runtime = "nodejs";
 
@@ -21,11 +22,14 @@ export async function GET(req: NextRequest) {
   const inst = findBySlug(symbol);
   if (!inst) return NextResponse.json({ error: "Unknown instrument" }, { status: 404 });
 
-  const [fundamentals, recommendations, earnings, peers] = await Promise.all([
-    getFundamentals(inst.slug).catch(() => ({ data: null, source: "simulated" as const })),
-    getRecommendations(inst.slug).catch(() => ({ data: null, source: "simulated" as const })),
-    getEarnings(inst.slug).catch(() => ({ data: [], source: "simulated" as const })),
-    getPeers(inst.slug).catch(() => ({ data: [], source: "simulated" as const })),
+  const [fundamentals, recommendations, earnings, peers, extras] = await Promise.all([
+    getFundamentals(inst.slug).catch(() => ({ data: null, source: "cached" as const })),
+    getRecommendations(inst.slug).catch(() => ({ data: null, source: "cached" as const })),
+    getEarnings(inst.slug).catch(() => ({ data: [], source: "cached" as const })),
+    getPeers(inst.slug).catch(() => ({ data: [], source: "cached" as const })),
+    // Ownership and rating changes ride along on the memoised summary fetch,
+    // so they cost no extra request.
+    fetchOwnershipAndRatings(inst).catch(() => ({ ownership: null, ratings: [] })),
   ]);
 
   return NextResponse.json(
@@ -35,6 +39,8 @@ export async function GET(req: NextRequest) {
         recommendations: recommendations.data,
         earnings: earnings.data,
         peers: peers.data,
+        ownership: extras.ownership,
+        ratings: extras.ratings,
       },
       source: fundamentals.source,
       asOf: Date.now(),

@@ -26,7 +26,8 @@ export type Sector =
   | "Communication"
   | "Real Estate"
   | "Index"
-  | "Crypto";
+  | "Crypto"
+  | "Fund";
 
 export interface Instrument {
   /** Provider-facing ticker. */
@@ -42,13 +43,15 @@ export interface Instrument {
   seedPrice: number;
   /** Seed market cap in native currency -- simulation layer only. */
   seedCap: number;
-  kind: "equity" | "index" | "crypto";
+  kind: "equity" | "index" | "crypto" | "fund";
   /**
    * CoinGecko's own id. Required for crypto because CoinGecko keys on a slug
    * ("bitcoin"), not a ticker -- and tickers collide across chains in a way
    * that ids do not.
    */
   coinId?: string;
+  /** For funds: what the thing actually holds, in one line. */
+  mandate?: string;
 }
 
 type Row = [symbol: string, name: string, sector: Sector, seedPrice: number, seedCapNative: number];
@@ -197,6 +200,53 @@ const NYSE_ROWS: Row[] = [
   ["NEE", "NextEra Energy", "Utilities", 72, 1.48e11],
 ];
 
+/* -- Funds and ETFs ---------------------------------------------------------
+   The instruments people actually hold for broad exposure, which a terminal
+   that only lists single stocks quietly pretends do not exist. Three groups:
+   globally-diversified UCITS funds on London and Amsterdam (the standard way
+   to own the world from outside the US), the large US index funds, and the
+   Indian index and gold funds listed on the NSE.
+
+   Currency is declared per row because many London lines are denominated in
+   dollars rather than sterling. */
+interface FundRow {
+  symbol: string;
+  name: string;
+  exchange: ExchangeCode;
+  currency: Currency;
+  seedPrice: number;
+  seedCap: number;
+  /** What the fund actually holds, in one line. */
+  mandate: string;
+}
+
+const FUND_ROWS: FundRow[] = [
+  // Global, UCITS, accumulating — the core holdings for a non-US investor.
+  { symbol: "VWRA", name: "Vanguard FTSE All-World (Acc)", exchange: "LSE", currency: "USD", seedPrice: 158, seedCap: 4.1e9, mandate: "Every investable listed company on earth, ~3,600 holdings" },
+  { symbol: "VWRP", name: "Vanguard FTSE All-World (Acc, GBP)", exchange: "LSE", currency: "GBP", seedPrice: 145, seedCap: 2.4e9, mandate: "The same all-world index, sterling line" },
+  { symbol: "VUAA", name: "Vanguard S&P 500 (Acc)", exchange: "LSE", currency: "USD", seedPrice: 118, seedCap: 1.2e10, mandate: "The S&P 500, accumulating rather than distributing" },
+  { symbol: "EIMI", name: "iShares Core MSCI EM IMI", exchange: "LSE", currency: "USD", seedPrice: 38, seedCap: 2.2e10, mandate: "Emerging markets including India, ~3,000 holdings" },
+  { symbol: "IWDA", name: "iShares Core MSCI World", exchange: "AMS", currency: "EUR", seedPrice: 130, seedCap: 8.4e10, mandate: "Developed markets only, no emerging exposure" },
+  { symbol: "AGGU", name: "iShares Core Global Aggregate Bond", exchange: "LSE", currency: "USD", seedPrice: 5.1, seedCap: 6.8e9, mandate: "Investment-grade bonds worldwide, currency hedged" },
+
+  // United States.
+  { symbol: "SPY", name: "SPDR S&P 500 ETF Trust", exchange: "NYSE", currency: "USD", seedPrice: 642, seedCap: 6.2e11, mandate: "The original S&P 500 fund, deepest options market" },
+  { symbol: "QQQ", name: "Invesco QQQ Trust", exchange: "NASDAQ", currency: "USD", seedPrice: 568, seedCap: 3.4e11, mandate: "The largest 100 non-financial Nasdaq listings" },
+  { symbol: "VOO", name: "Vanguard S&P 500 ETF", exchange: "NYSE", currency: "USD", seedPrice: 588, seedCap: 6.4e11, mandate: "The S&P 500 at the lowest common fee" },
+  { symbol: "VTI", name: "Vanguard Total Stock Market", exchange: "NYSE", currency: "USD", seedPrice: 318, seedCap: 4.9e11, mandate: "Every US listed company, not just the large ones" },
+  { symbol: "GLD", name: "SPDR Gold Shares", exchange: "NYSE", currency: "USD", seedPrice: 248, seedCap: 8.1e10, mandate: "Physical gold held in a London vault" },
+  { symbol: "TLT", name: "iShares 20+ Year Treasury Bond", exchange: "NASDAQ", currency: "USD", seedPrice: 88, seedCap: 4.8e10, mandate: "Long-dated US government bonds — the duration trade" },
+  { symbol: "IEMG", name: "iShares Core MSCI Emerging Markets", exchange: "NYSE", currency: "USD", seedPrice: 62, seedCap: 9.2e10, mandate: "Emerging markets, US-listed equivalent of EIMI" },
+  { symbol: "INDA", name: "iShares MSCI India ETF", exchange: "NASDAQ", currency: "USD", seedPrice: 54, seedCap: 8.4e9, mandate: "Indian large and mid caps, in dollars" },
+
+  // India.
+  { symbol: "NIFTYBEES", name: "Nippon India ETF Nifty 50 BeES", exchange: "NSE", currency: "INR", seedPrice: 272, seedCap: 4_800e7, mandate: "The Nifty 50, India's oldest ETF" },
+  { symbol: "GOLDBEES", name: "Nippon India ETF Gold BeES", exchange: "NSE", currency: "INR", seedPrice: 82, seedCap: 2_900e7, mandate: "Physical gold, held domestically" },
+  { symbol: "BANKBEES", name: "Nippon India ETF Nifty Bank BeES", exchange: "NSE", currency: "INR", seedPrice: 578, seedCap: 1_100e7, mandate: "The Nifty Bank index" },
+  { symbol: "JUNIORBEES", name: "Nippon India ETF Nifty Next 50", exchange: "NSE", currency: "INR", seedPrice: 742, seedCap: 1_400e7, mandate: "The fifty companies behind the Nifty 50" },
+  { symbol: "MON100", name: "Motilal Oswal Nasdaq 100 ETF", exchange: "NSE", currency: "INR", seedPrice: 148, seedCap: 4_600e7, mandate: "The Nasdaq 100, bought in rupees from India" },
+];
+
 /* -- Digital assets -------------------------------------------------------- */
 interface CryptoRow {
   symbol: string;
@@ -284,6 +334,24 @@ export const EQUITIES: Instrument[] = [
   ...build(NYSE_ROWS, "NYSE"),
 ];
 
+export const FUNDS: Instrument[] = FUND_ROWS.map((r) => ({
+  symbol: r.symbol,
+  // Indian and European lines are venue-qualified because their tickers can
+  // collide with US ones; US funds keep the bare ticker.
+  slug: r.exchange === "NSE" || r.exchange === "LSE" || r.exchange === "AMS"
+    ? `${r.symbol}.${r.exchange}`
+    : r.symbol,
+  name: r.name,
+  exchange: r.exchange,
+  region: EXCHANGES[r.exchange].region,
+  currency: r.currency,
+  sector: "Fund" as const,
+  seedPrice: r.seedPrice,
+  seedCap: r.seedCap,
+  kind: "fund" as const,
+  mandate: r.mandate,
+}));
+
 export const CRYPTO: Instrument[] = CRYPTO_ROWS.map((r) => ({
   symbol: r.symbol,
   slug: r.symbol,
@@ -298,7 +366,7 @@ export const CRYPTO: Instrument[] = CRYPTO_ROWS.map((r) => ({
   coinId: r.coinId,
 }));
 
-export const UNIVERSE: Instrument[] = [...INDICES, ...EQUITIES, ...CRYPTO];
+export const UNIVERSE: Instrument[] = [...INDICES, ...EQUITIES, ...FUNDS, ...CRYPTO];
 
 const BY_SLUG = new Map<string, Instrument>();
 const BY_SYMBOL = new Map<string, Instrument>();
@@ -349,6 +417,7 @@ export const SECTOR_HUE: Record<Sector, string> = {
   "Real Estate": "#e08a5f",
   Index: "#f4f2ec",
   Crypto: "#4fd1c5",
+  Fund: "#b48ef0",
 };
 
 /** Instrument pages worth pre-rendering at build time. */
@@ -372,7 +441,16 @@ export const DEFAULT_WATCHLIST: string[] = [
  * a session that opens and closes.
  */
 export function instrumentsByRegion(region: Region): Instrument[] {
-  return region === "GLOBAL" ? CRYPTO : EQUITIES.filter((i) => i.region === region);
+  if (region === "GLOBAL") return CRYPTO;
+  // Europe is funds-only in this universe — there are no single European
+  // equities here, and pretending otherwise would give an empty table.
+  if (region === "EU") return FUNDS.filter((i) => i.region === "EU");
+  return EQUITIES.filter((i) => i.region === region);
+}
+
+/** Every fund, for the dedicated funds surface. */
+export function fundsByRegion(region?: Region): Instrument[] {
+  return region ? FUNDS.filter((i) => i.region === region) : FUNDS;
 }
 
 export function indicesByRegion(region: Region): Instrument[] {
@@ -411,6 +489,7 @@ export function searchUniverse(query: string, limit = 12): Instrument[] {
       // typing "S" more often wants SPX than SBUX.
       if (inst.kind === "index") score += 60;
       if (inst.kind === "crypto") score += 40;
+      if (inst.kind === "fund") score += 30;
       scored.push({ inst, score });
     }
   }

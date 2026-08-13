@@ -78,11 +78,20 @@ export function yahooSymbolFor(inst: Instrument): string | null {
   if (inst.kind === "index") return INDEX_SYMBOLS[inst.slug] ?? null;
   if (inst.kind === "crypto") return `${inst.symbol}-USD`;
 
-  if (inst.exchange === "NSE") return `${inst.symbol}.NS`;
-  if (inst.exchange === "BSE") return `${inst.symbol}.BO`;
-
-  // US listings: share classes are hyphenated on Yahoo (BRK.B → BRK-B).
-  return inst.symbol.replace(".", "-");
+  switch (inst.exchange) {
+    case "NSE":
+      return `${inst.symbol}.NS`;
+    case "BSE":
+      return `${inst.symbol}.BO`;
+    // London and Amsterdam suffixes, which is how the UCITS funds resolve.
+    case "LSE":
+      return `${inst.symbol}.L`;
+    case "AMS":
+      return `${inst.symbol}.AS`;
+    default:
+      // US listings: share classes are hyphenated on Yahoo (BRK.B → BRK-B).
+      return inst.symbol.replace(".", "-");
+  }
 }
 
 interface ChartMeta {

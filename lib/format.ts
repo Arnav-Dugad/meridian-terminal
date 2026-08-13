@@ -9,7 +9,18 @@
  * accident.
  */
 
-export type Currency = "INR" | "USD";
+/**
+ * Currencies the terminal can display.
+ *
+ * INR and USD are the two the portfolio totals in; EUR and GBP exist because
+ * several of the globally-diversified funds are denominated in them, and
+ * labelling a euro price as dollars to avoid widening this union would be a
+ * lie for the sake of a type.
+ */
+export type Currency = "INR" | "USD" | "EUR" | "GBP";
+
+/** The two a portfolio can be totalled in, which requires an FX rate we have. */
+export type BaseCurrency = "INR" | "USD";
 
 const LAKH = 1e5;
 const CRORE = 1e7;
@@ -29,12 +40,31 @@ function getFormatter(locale: string, opts: Intl.NumberFormatOptions) {
   return f;
 }
 
+const LOCALES: Record<Currency, string> = {
+  INR: "en-IN",
+  USD: "en-US",
+  EUR: "de-DE",
+  GBP: "en-GB",
+};
+
+const SYMBOLS: Record<Currency, string> = {
+  INR: "₹",
+  USD: "$",
+  EUR: "€",
+  GBP: "£",
+};
+
 export function localeFor(currency: Currency) {
-  return currency === "INR" ? "en-IN" : "en-US";
+  return LOCALES[currency] ?? "en-US";
 }
 
 export function symbolFor(currency: Currency) {
-  return currency === "INR" ? "₹" : "$";
+  return SYMBOLS[currency] ?? "$";
+}
+
+/** Only the Indian system groups in lakh and crore. */
+function usesIndianScale(currency: Currency) {
+  return currency === "INR";
 }
 
 /**
@@ -70,7 +100,7 @@ export function formatCompactMoney(
   const v = Math.abs(value);
   const sym = symbolFor(currency);
 
-  if (currency === "INR") {
+  if (usesIndianScale(currency)) {
     if (v >= 1e5 * CRORE) return `${sign}${sym}${trim(v / (1e5 * CRORE))} L Cr`;
     if (v >= CRORE) return `${sign}${sym}${trim(v / CRORE)} Cr`;
     if (v >= LAKH) return `${sign}${sym}${trim(v / LAKH)} L`;
@@ -90,7 +120,7 @@ export function formatCompact(value: number | null | undefined, currency: Curren
   if (value == null || !Number.isFinite(value)) return "—";
   const sign = value < 0 ? "-" : "";
   const v = Math.abs(value);
-  if (currency === "INR") {
+  if (usesIndianScale(currency)) {
     if (v >= CRORE) return `${sign}${trim(v / CRORE)} Cr`;
     if (v >= LAKH) return `${sign}${trim(v / LAKH)} L`;
     if (v >= 1000) return `${sign}${trim(v / 1000)} K`;

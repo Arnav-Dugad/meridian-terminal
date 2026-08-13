@@ -14,7 +14,7 @@ import { QuoteTable } from "@/components/market/QuoteTable";
 import { DataSourceNotice } from "@/components/market/DataSourceNotice";
 import { Badge, Panel, PanelHeader, Segmented } from "@/components/ui/primitives";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
-import { instrumentsByRegion } from "@/lib/market/universe";
+import { fundsByRegion, instrumentsByRegion } from "@/lib/market/universe";
 import { formatRelative } from "@/lib/format";
 import type { Region } from "@/lib/market/exchanges";
 
@@ -34,10 +34,12 @@ export function MarketsView({
     () =>
       instrumentsByRegion(region)
         .sort((a, b) => b.seedCap - a.seedCap)
-        .slice(0, region === "GLOBAL" ? 18 : 40)
+        .slice(0, region === "GLOBAL" ? 18 : region === "EU" ? 12 : 40)
         .map((i) => i.slug),
     [region],
   );
+
+  const fundSlugs = useMemo(() => fundsByRegion().map((i) => i.slug), []);
 
   return (
     <>
@@ -126,6 +128,7 @@ export function MarketsView({
                   options={[
                     { value: "IN", label: "India" },
                     { value: "US", label: "US" },
+                    { value: "EU", label: "Funds" },
                     { value: "GLOBAL", label: "Crypto" },
                   ]}
                 />
@@ -133,6 +136,18 @@ export function MarketsView({
             }
           />
           <QuoteTable symbols={constituents} defaultSort="turnover" />
+        </Panel>
+
+        {/* Funds, across every venue at once. Someone choosing between VWRA,
+            a Nifty tracker and SPY is making one decision, so they belong in
+            one table rather than scattered across regional tabs. */}
+        <Panel flush>
+          <PanelHeader
+            title="Funds and ETFs"
+            subtitle="Broad exposure across London, Amsterdam, New York and the NSE"
+            action={<Badge tone="neutral">{fundSlugs.length}</Badge>}
+          />
+          <QuoteTable symbols={fundSlugs} defaultSort="change" compact />
         </Panel>
 
         {/* Digital assets get their own strip rather than being folded into

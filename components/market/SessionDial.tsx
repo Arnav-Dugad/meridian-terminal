@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
 
-import { EXCHANGES, formatCountdown, sessionState, type ExchangeCode } from "@/lib/market/exchanges";
+import {
+  EXCHANGES,
+  formatCountdown,
+  REGION_ACCENT,
+  sessionState,
+  type ExchangeCode,
+} from "@/lib/market/exchanges";
 import { convertMinutes, formatOffset, localTimezone, minutesInZone } from "@/lib/market/timezone";
 import { cn } from "@/lib/utils";
 import { StatusDot } from "@/components/ui/primitives";
@@ -81,7 +87,18 @@ export function SessionDial({
   const openNow = sessions.filter((s) => s.live);
 
   return (
-    <div className={cn("flex items-center gap-6", className)}>
+    /*
+     * A container query, not a viewport one. This component appears in a 340px
+     * sidebar, a 440px auth panel and a full-width section, and only the
+     * container knows which. Below 22rem it stacks; above it, the dial sits
+     * beside the list.
+     */
+    <div
+      className={cn(
+        "@container flex flex-col items-center gap-5 @[22rem]:flex-row @[22rem]:items-center @[22rem]:gap-6",
+        className,
+      )}
+    >
       <div className="relative shrink-0" style={{ width: CENTRE * 2, height: CENTRE * 2 }}>
         <svg
           width={CENTRE * 2}
@@ -186,39 +203,57 @@ export function SessionDial({
       </div>
 
       {!compact && (
-        <dl className="min-w-0 flex-1 space-y-3">
+        /*
+         * Each exchange is a two-row block, not a left/right split.
+         *
+         * The split version collapsed catastrophically in the Markets sidebar:
+         * the countdown carried `shrink-0`, so on a ~90px column it claimed the
+         * entire width and the label beside it wrapped one character per line.
+         * Stacking removes the competition for horizontal space entirely, and
+         * the container query below promotes it back to a row only where there
+         * is genuinely room.
+         */
+        <dl className="min-w-0 flex-1 space-y-3.5">
           {exchanges.map((code) => {
             const ex = EXCHANGES[code];
             const state = now == null ? null : sessionState(code, new Date(now));
-            const color = ex.region === "IN" ? "#f0a63c" : "#7ba7f0";
+            const color = REGION_ACCENT[ex.region] ?? "#7ba7f0";
 
             return (
-              <div key={code} className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <dt className="flex items-center gap-2">
-                    <span className="h-2 w-2 shrink-0 rounded-[1px]" style={{ backgroundColor: color }} />
-                    <span className="num-mono text-[12px] text-ivory">{code}</span>
-                    {state?.isLive && <StatusDot tone="up" live />}
-                  </dt>
-                  <dd className="mt-1 pl-4 text-[11px] text-ivory-40">
-                    {formatSessionWindow(ex.timezone, ex.open, ex.close)} · {formatOffset(ex.timezone)}
-                  </dd>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p
+              <div key={code} className="min-w-0">
+                <dt className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-[1px]"
+                    style={{ backgroundColor: color }}
+                  />
+                  <span className="num-mono text-[12px] text-ivory">{code}</span>
+                  {state?.isLive && <StatusDot tone="up" live />}
+                  <span
                     className={cn(
-                      "label-micro-tight",
-                      state?.isLive ? "text-up" : state?.phase === "pre" ? "text-signal" : "text-ivory-40",
+                      "label-micro-tight ml-auto",
+                      state?.isLive
+                        ? "text-up"
+                        : state?.phase === "pre"
+                          ? "text-signal"
+                          : "text-ivory-40",
                     )}
                   >
                     {state?.label ?? "—"}
-                  </p>
-                  <p className="num-mono mt-1 text-[11px] text-ivory-60">
+                  </span>
+                </dt>
+
+                <dd className="mt-1.5 min-w-0 pl-4">
+                  <p className="num-mono truncate text-[11px] text-ivory-60">
                     {state?.secondsToNextBoundary != null
                       ? `${state.nextBoundaryLabel} ${formatCountdown(state.secondsToNextBoundary)}`
                       : (state?.nextBoundaryLabel ?? "—")}
                   </p>
-                </div>
+                  {/* The session window is the least important line here, so it
+                      is the one that hides first on a narrow column. */}
+                  <p className="mt-0.5 hidden truncate text-[10px] text-ivory-40 @[15rem]:block">
+                    {formatSessionWindow(ex.open, ex.close)} · {formatOffset(ex.timezone)}
+                  </p>
+                </dd>
               </div>
             );
           })}
@@ -257,9 +292,8 @@ function formatLocalClock(at: number, tz: string): string {
   }).format(new Date(at));
 }
 
-function formatSessionWindow(tz: string, open: number, close: number): string {
-  void tz;
+function formatSessionWindow(open: number, close: number): string {
   const fmt = (m: number) =>
     `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-  return `${fmt(open)}–${fmt(close)} local`;
+  return `${fmt(open)}–${fmt(close)}`;
 }

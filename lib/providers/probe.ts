@@ -7,6 +7,7 @@ import { fmp } from "@/lib/providers/fmp";
 import { twelveData } from "@/lib/providers/twelvedata";
 import { yahoo } from "@/lib/providers/yahoo";
 import { limiterSnapshot } from "@/lib/providers/limiter";
+import { breakerSnapshot } from "@/lib/providers/breaker";
 import type { QuoteProvider } from "@/lib/providers/types";
 import { findBySlug, type Instrument } from "@/lib/market/universe";
 
@@ -40,6 +41,8 @@ export interface ProbeResult {
   envVar: string | null;
   coverage: string[];
   budget: { minute: number | null; day: number | null };
+  /** Breaker state, so a paused provider reads as recovering not broken. */
+  circuit: { state: "closed" | "open" | "half-open"; retryInSeconds: number };
 }
 
 interface ProbeSpec {
@@ -129,6 +132,7 @@ const SPECS: ProbeSpec[] = [
 
 export async function runProviderProbes(): Promise<ProbeResult[]> {
   const budgets = limiterSnapshot();
+  const breakers = new Map(breakerSnapshot().map((b) => [b.provider, b]));
 
   // Probes run in parallel because they draw on independent budgets; running
   // them in series would make the page take six round trips to load.
@@ -144,6 +148,12 @@ export async function runProviderProbes(): Promise<ProbeResult[]> {
         envVar: meta.envVar,
         coverage: meta.coverage as string[],
         budget: budgets[meta.id] ?? { minute: null, day: null },
+        circuit: (() => {
+          const b = breakers.get(meta.id);
+          return b
+            ? { state: b.state, retryInSeconds: b.retryInSeconds }
+            : { state: "closed" as const, retryInSeconds: 0 };
+        })(),
       };
 
       if (!meta.configured) {

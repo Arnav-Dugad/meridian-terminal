@@ -16,6 +16,8 @@ import { DriftPanel } from "@/components/market/DriftPanel";
 import { SeasonalityPanel } from "@/components/market/SeasonalityPanel";
 import { InsiderPanel } from "@/components/market/InsiderPanel";
 import { PeerValuation } from "@/components/market/PeerValuation";
+import { OwnershipPanel } from "@/components/market/OwnershipPanel";
+import type { Ownership, RatingChange } from "@/lib/providers/yahoo-summary";
 import { useCorporateActionEvents } from "@/lib/hooks/use-corporate-events";
 import {
   AnalystPanel,
@@ -189,6 +191,8 @@ export function StockView({
           </span>
         }
         title={quote.name}
+        // For a fund, what it holds is more useful than any price statistic.
+        description={instrument?.mandate}
         meta={
           <>
             <Badge tone={instrument?.region === "IN" ? "india" : "usa"}>{quote.symbol}</Badge>
@@ -513,6 +517,12 @@ export function StockView({
                 currency={currency}
                 loading={research.loading}
               />
+              <OwnershipPanel
+                ownership={research.ownership}
+                ratings={research.ratings}
+                currency={currency}
+                loading={research.loading}
+              />
               <PeersPanel peers={research.peers} loading={research.loading} />
               <InsiderPanel slug={slug} currency={currency} />
               <NewsPanel
@@ -648,8 +658,20 @@ interface ResearchState {
   recommendations: AnalystConsensus | null;
   earnings: EarningsPoint[];
   peers: string[];
+  ownership: Ownership | null;
+  ratings: RatingChange[];
   loading: boolean;
 }
+
+const EMPTY_RESEARCH: ResearchState = {
+  fundamentals: null,
+  recommendations: null,
+  earnings: [],
+  peers: [],
+  ownership: null,
+  ratings: [],
+  loading: false,
+};
 
 /**
  * One request for the whole research column.
@@ -659,17 +681,11 @@ interface ResearchState {
  * fundamentals lookup would trade a visible improvement for an invisible one.
  */
 function useResearch(slug: string, enabled: boolean): ResearchState {
-  const [state, setState] = useState<ResearchState>({
-    fundamentals: null,
-    recommendations: null,
-    earnings: [],
-    peers: [],
-    loading: enabled,
-  });
+  const [state, setState] = useState<ResearchState>({ ...EMPTY_RESEARCH, loading: enabled });
 
   useEffect(() => {
     if (!enabled) {
-      setState({ fundamentals: null, recommendations: null, earnings: [], peers: [], loading: false });
+      setState(EMPTY_RESEARCH);
       return;
     }
 
@@ -684,27 +700,14 @@ function useResearch(slug: string, enabled: boolean): ResearchState {
         });
         if (!res.ok) throw new Error(`research ${res.status}`);
 
-        const body = (await res.json()) as {
-          data: {
-            fundamentals: Fundamentals | null;
-            recommendations: AnalystConsensus | null;
-            earnings: EarningsPoint[];
-            peers: string[];
-          };
-        };
+        const body = (await res.json()) as { data: Omit<ResearchState, "loading"> };
         if (cancelled) return;
-        setState({ ...body.data, loading: false });
+        setState({ ...EMPTY_RESEARCH, ...body.data, loading: false });
       } catch (err) {
         if (cancelled || (err instanceof Error && err.name === "AbortError")) return;
         // Each panel renders its own "unavailable" state, so an empty result
         // is a complete answer rather than an error to surface.
-        setState({
-          fundamentals: null,
-          recommendations: null,
-          earnings: [],
-          peers: [],
-          loading: false,
-        });
+        setState(EMPTY_RESEARCH);
       }
     })();
 

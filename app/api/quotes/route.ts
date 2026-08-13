@@ -30,8 +30,18 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const { data, source, notice, providers } = await getQuotes(parsed.data.symbols);
-    const body: ApiEnvelope<Quote[]> = { data, source, asOf: Date.now(), notice, providers };
+    const { data, source, notice, providers, failures } = await getQuotes(parsed.data.symbols);
+    // `failures` is forwarded so the client can render a per-instrument gap
+    // with its reason, rather than silently showing a shorter list than was
+    // asked for.
+    const body: ApiEnvelope<Quote[]> = {
+      data,
+      source,
+      asOf: Date.now(),
+      notice,
+      providers,
+      failures,
+    };
 
     return NextResponse.json(body, {
       headers: {

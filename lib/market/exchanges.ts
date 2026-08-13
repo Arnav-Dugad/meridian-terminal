@@ -10,8 +10,8 @@ import type { Currency } from "@/lib/format";
  * tick smoothly.
  */
 
-export type ExchangeCode = "NSE" | "BSE" | "NASDAQ" | "NYSE" | "CRYPTO";
-export type Region = "IN" | "US" | "GLOBAL";
+export type ExchangeCode = "NSE" | "BSE" | "NASDAQ" | "NYSE" | "CRYPTO" | "LSE" | "AMS";
+export type Region = "IN" | "US" | "GLOBAL" | "EU";
 
 export interface ExchangeMeta {
   code: ExchangeCode;
@@ -87,6 +87,46 @@ export const EXCHANGES: Record<ExchangeCode, ExchangeMeta> = {
     tradingDays: [1, 2, 3, 4, 5],
     flagAccent: "#7ba7f0",
   },
+  /*
+   * London and Amsterdam.
+   *
+   * Added for the globally-diversified UCITS ETFs an Indian or European
+   * investor actually buys — VWRA, VUAA, EIMI, IWDA. These are the standard
+   * way to hold the whole world from outside the US, and they are absent from
+   * every consumer terminal that only speaks NSE and Nasdaq.
+   *
+   * Note that many LSE lines are denominated in USD rather than sterling, so
+   * currency is declared per instrument rather than taken from the venue.
+   */
+  LSE: {
+    code: "LSE",
+    name: "London Stock Exchange",
+    region: "EU",
+    country: "United Kingdom",
+    currency: "USD",
+    timezone: "Europe/London",
+    preOpen: 7 * 60 + 50,
+    open: 8 * 60,
+    close: 16 * 60 + 30,
+    postClose: 17 * 60 + 15,
+    tradingDays: [1, 2, 3, 4, 5],
+    flagAccent: "#b48ef0",
+  },
+  AMS: {
+    code: "AMS",
+    name: "Euronext Amsterdam",
+    region: "EU",
+    country: "Netherlands",
+    currency: "USD",
+    timezone: "Europe/Amsterdam",
+    preOpen: 8 * 60 + 45,
+    open: 9 * 60,
+    close: 17 * 60 + 30,
+    postClose: 17 * 60 + 40,
+    tradingDays: [1, 2, 3, 4, 5],
+    flagAccent: "#b48ef0",
+  },
+
   // Not an exchange so much as a venue class. Modelled here so crypto flows
   // through the same session, currency and routing machinery as equities
   // instead of needing a parallel code path everywhere.
@@ -109,11 +149,13 @@ export const EXCHANGES: Record<ExchangeCode, ExchangeMeta> = {
 export const REGION_LABEL: Record<Region, string> = {
   IN: "India",
   US: "United States",
+  EU: "Europe",
   GLOBAL: "Digital assets",
 };
 export const REGION_ACCENT: Record<Region, string> = {
   IN: "#f0a63c",
   US: "#7ba7f0",
+  EU: "#b48ef0",
   GLOBAL: "#4fd1c5",
 };
 

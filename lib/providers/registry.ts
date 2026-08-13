@@ -72,7 +72,11 @@ function chainFor(capability: Capability, inst: Instrument): QuoteProvider[] {
 
   switch (capability) {
     case "quote":
-      if (inst.region === "IN") {
+      if (inst.region === "EU") {
+        // London and Amsterdam are Yahoo-only in this stack; no other free
+        // source here reaches European venues.
+        chain.push(yahoo);
+      } else if (inst.region === "IN") {
         // Yahoo is the only free route to NSE and BSE. Alpha Vantage is a real
         // fallback here — it reaches BSE — but at 25 calls a day it is a
         // last resort, not a tier.
@@ -176,9 +180,22 @@ export interface QuoteResult {
 export async function fetchQuotes(instruments: Instrument[]): Promise<QuoteResult> {
   if (instruments.length === 0) return { quotes: [], providers: [] };
 
-  const crypto = instruments.filter((i) => i.kind === "crypto");
-  const us = instruments.filter((i) => i.kind !== "crypto" && i.region === "US");
-  const india = instruments.filter((i) => i.kind !== "crypto" && i.region === "IN");
+  /*
+   * Bucket by routing class, derived rather than enumerated.
+   *
+   * An earlier version hardcoded three buckets — crypto, US, India — and any
+   * instrument outside them was silently dropped: no quote, no error, just
+   * absent. Adding European listings exposed it instantly. Deriving the
+   * buckets from the data means a new region is routed the moment it exists,
+   * and can never fall through the gap.
+   */
+  const buckets = new Map<string, Instrument[]>();
+  for (const inst of instruments) {
+    const key = inst.kind === "crypto" ? "crypto" : inst.region;
+    const list = buckets.get(key);
+    if (list) list.push(inst);
+    else buckets.set(key, [inst]);
+  }
 
   const found = new Map<string, Quote>();
   const providers = new Set<string>();
@@ -216,7 +233,9 @@ export async function fetchQuotes(instruments: Instrument[]): Promise<QuoteResul
     }
   };
 
-  await Promise.all([runBucket(crypto), runBucket(us), runBucket(india)]);
+  // Buckets run concurrently because they draw on independent budgets — a
+  // Finnhub call and a Yahoo call do not compete for the same allowance.
+  await Promise.all(Array.from(buckets.values()).map(runBucket));
 
   // Finnhub's quote carries no market cap and no volume. One extra call per
   // symbol would be affordable, but only for the handful the user is actually

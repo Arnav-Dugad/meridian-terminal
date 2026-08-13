@@ -47,6 +47,11 @@ const MODULES = [
   "recommendationTrend",
   "earningsHistory",
   "assetProfile",
+  // Ownership and rating changes come free with the request already being
+  // made, so there is no reason not to ask for them.
+  "majorHoldersBreakdown",
+  "institutionOwnership",
+  "upgradeDowngradeHistory",
 ].join(",");
 
 export const yahooSummaryMeta: ProviderMeta = {
@@ -134,6 +139,9 @@ interface SummaryResult {
   recommendationTrend?: { trend?: Record<string, unknown>[] };
   earningsHistory?: { history?: Record<string, Wrapped>[] };
   assetProfile?: { sector?: string; industry?: string; longBusinessSummary?: string; website?: string; fullTimeEmployees?: number; country?: string };
+  majorHoldersBreakdown?: Record<string, Wrapped>;
+  institutionOwnership?: { ownershipList?: Record<string, unknown>[] };
+  upgradeDowngradeHistory?: { history?: Record<string, unknown>[] };
 }
 
 /**
@@ -337,6 +345,118 @@ export async function fetchNextEarningsDate(inst: Instrument): Promise<number | 
     return first?.raw != null ? first.raw * 1000 : null;
   } catch {
     return null;
+  }
+}
+
+/* ── Ownership and rating changes ─────────────────────────────────────────── */
+
+export interface OwnershipHolder {
+  name: string;
+  /** Share of the company held, as a percentage. */
+  percentHeld: number | null;
+  shares: number | null;
+  value: number | null;
+  reportedAt: number | null;
+}
+
+export interface Ownership {
+  /** Percentage held by insiders. */
+  insiderPercent: number | null;
+  /** Percentage held by institutions. */
+  institutionPercent: number | null;
+  institutionCount: number | null;
+  topHolders: OwnershipHolder[];
+}
+
+export interface RatingChange {
+  firm: string;
+  from: string | null;
+  to: string;
+  /** "up", "down", "init", "main" — Yahoo's own wording, normalised. */
+  action: "upgrade" | "downgrade" | "initiated" | "maintained" | "other";
+  at: number | null;
+}
+
+/**
+ * Who owns the company, and who changed their mind about it.
+ *
+ * Both arrive in the same payload as the fundamentals, so this costs nothing
+ * beyond the parsing — the memoised fetch means calling it after
+ * `fetchFundamentals` reuses the same response.
+ */
+export async function fetchOwnershipAndRatings(inst: Instrument): Promise<{
+  ownership: Ownership | null;
+  ratings: RatingChange[];
+}> {
+  try {
+    const r = await fetchSummary(inst);
+    if (!r) return { ownership: null, ratings: [] };
+
+    const holders = r.majorHoldersBreakdown ?? {};
+    const institutions = r.institutionOwnership?.ownershipList ?? [];
+
+    const ownership: Ownership = {
+      insiderPercent: asPercent(pick(holders["insidersPercentHeld"] as Wrapped)),
+      institutionPercent: asPercent(pick(holders["institutionsPercentHeld"] as Wrapped)),
+      institutionCount: pick(holders["institutionsCount"] as Wrapped),
+      topHolders: institutions
+        .map((h) => {
+          const row = h as Record<string, Wrapped>;
+          const name = pickString(row["organization"]);
+          if (!name) return null;
+          return {
+            name,
+            percentHeld: asPercent(pick(row["pctHeld"])),
+            shares: pick(row["position"]),
+            value: pick(row["value"]),
+            reportedAt: (() => {
+              const t = pick(row["reportDate"]);
+              return t != null ? t * 1000 : null;
+            })(),
+          } satisfies OwnershipHolder;
+        })
+        .filter((h): h is OwnershipHolder => h !== null)
+        .slice(0, 8),
+    };
+
+    const history = r.upgradeDowngradeHistory?.history ?? [];
+    const ratings: RatingChange[] = [];
+    for (const row of history.slice(0, 12)) {
+      const h = row as Record<string, unknown>;
+      const firm = typeof h["firm"] === "string" ? h["firm"] : null;
+      const to = typeof h["toGrade"] === "string" ? h["toGrade"] : null;
+      if (!firm || !to) continue;
+
+      const raw = typeof h["action"] === "string" ? h["action"] : "";
+      ratings.push({
+        firm,
+        from: typeof h["fromGrade"] === "string" && h["fromGrade"] ? h["fromGrade"] : null,
+        to,
+        action:
+          raw === "up"
+            ? "upgrade"
+            : raw === "down"
+              ? "downgrade"
+              : raw === "init"
+                ? "initiated"
+                : raw === "main"
+                  ? "maintained"
+                  : "other",
+        at: (() => {
+          const t = pick(h["epochGradeDate"] as Wrapped);
+          return t != null ? (t > 1e11 ? t : t * 1000) : null;
+        })(),
+      });
+    }
+
+    const hasOwnership =
+      ownership.insiderPercent != null ||
+      ownership.institutionPercent != null ||
+      ownership.topHolders.length > 0;
+
+    return { ownership: hasOwnership ? ownership : null, ratings };
+  } catch {
+    return { ownership: null, ratings: [] };
   }
 }
 

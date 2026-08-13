@@ -167,6 +167,8 @@ export interface ApiEnvelope<T> {
   notice?: string;
   /** Upstream ids that contributed, for attribution and debugging. */
   providers?: string[];
+  /** Instruments no source could answer for, with the reason for each. */
+  failures?: DataFailure[];
 }
 
 export class TwelveDataError extends Error {

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { useQuotes } from "@/lib/hooks/market-data";
-import { formatPrice, formatPercent, directionOf } from "@/lib/format";
+import { formatPrice, formatPercent, directionOf, type Currency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { findBySlug } from "@/lib/market/universe";
 
@@ -97,7 +97,7 @@ function TapeItem({
   exchange?: string;
   price: number | undefined;
   changePercent: number | undefined;
-  currency: "INR" | "USD";
+  currency: Currency;
 }) {
   const dir = directionOf(changePercent);
 
