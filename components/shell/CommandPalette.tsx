@@ -20,9 +20,11 @@ import {
   IconBell,
   IconBriefcase,
   IconChart,
+  IconCoin,
   IconFilter,
   IconGlobe,
   IconLayers,
+  IconNews,
   IconPulse,
   IconScale,
   IconSearch,
@@ -66,9 +68,10 @@ interface NavCommand {
 
 const NAV_COMMANDS: NavCommand[] = [
   { id: "dashboard", label: "Dashboard", hint: "Cross-market overview", href: "/dashboard", icon: <IconPulse />, keywords: "home overview pulse" },
-  { id: "markets", label: "Markets", hint: "Indices, breadth and sector rotation", href: "/markets", icon: <IconGlobe />, keywords: "indices heatmap sectors breadth" },
-  { id: "screener", label: "Screener", hint: "Filter both markets on live metrics", href: "/screener", icon: <IconFilter />, keywords: "filter scan search stocks" },
-  { id: "compare", label: "Compare", hint: "Normalised performance across markets", href: "/compare", icon: <IconScale />, keywords: "correlation versus relative" },
+  { id: "markets", label: "Markets", hint: "Indices, breadth, sectors and crypto", href: "/markets", icon: <IconGlobe />, keywords: "indices heatmap sectors breadth crypto" },
+  { id: "screener", label: "Screener", hint: "Filter every market on live metrics", href: "/screener", icon: <IconFilter />, keywords: "filter scan search stocks" },
+  { id: "compare", label: "Compare", hint: "Normalised performance and correlation", href: "/compare", icon: <IconScale />, keywords: "correlation versus relative beta" },
+  { id: "news", label: "Newsroom", hint: "Market and company headlines", href: "/news", icon: <IconNews />, keywords: "news headlines press articles" },
   { id: "watchlist", label: "Watchlist", hint: "Your tracked instruments", href: "/watchlist", icon: <IconStar />, keywords: "saved favourites starred" },
   { id: "portfolio", label: "Portfolio", hint: "Holdings, P&L and risk", href: "/portfolio", icon: <IconBriefcase />, keywords: "holdings positions pnl profit returns" },
   { id: "alerts", label: "Alerts", hint: "Price triggers", href: "/alerts", icon: <IconBell />, keywords: "notifications triggers price" },
@@ -346,7 +349,7 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
                         ) : (
                           <>
                             <span className={cn("shrink-0", active ? "text-signal" : "text-ivory-40")}>
-                              <IconChart />
+                              {row.instrument.kind === "crypto" ? <IconCoin /> : <IconChart />}
                             </span>
                             <span className="min-w-0 flex-1">
                               <span className="flex items-center gap-2">
@@ -361,7 +364,15 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
                                 {row.instrument.name}
                               </span>
                             </span>
-                            <Badge tone={row.instrument.region === "IN" ? "india" : "usa"}>
+                            <Badge
+                              tone={
+                                row.instrument.region === "IN"
+                                  ? "india"
+                                  : row.instrument.region === "GLOBAL"
+                                    ? "crypto"
+                                    : "usa"
+                              }
+                            >
                               {row.instrument.exchange}
                             </Badge>
                           </>

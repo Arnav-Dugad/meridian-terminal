@@ -314,10 +314,14 @@ export function Segmented<T extends string>({
   const text = { xs: "text-[10px] px-2", sm: "text-[11px] px-2.5", md: "text-xs px-3" } as const;
 
   return (
+    // A seven-option range picker does not fit a 360px viewport. Rather than
+    // shrinking the targets below the point of usability, the strip scrolls —
+    // `max-w-full` keeps it from widening its parent, and `scroll-x` hides the
+    // scrollbar because on a 28px-tall control it is pure noise.
     <div
       role="tablist"
       className={cn(
-        "inline-flex items-center gap-0.5 rounded-sm border border-line bg-ink-900 p-0.5",
+        "scroll-x snap-strip inline-flex max-w-full items-center gap-0.5 rounded-sm border border-line bg-ink-900 p-0.5",
         className,
       )}
     >
@@ -331,7 +335,7 @@ export function Segmented<T extends string>({
             title={opt.title}
             onClick={() => onChange(opt.value)}
             className={cn(
-              "relative rounded-[3px] font-medium transition-colors duration-150",
+              "relative shrink-0 whitespace-nowrap rounded-[3px] font-medium transition-colors duration-150",
               heights[size],
               text[size],
               active ? "text-ink-1000" : "text-ivory-60 hover:text-ivory",
@@ -365,7 +369,7 @@ export function Badge({
   className,
 }: {
   children: ReactNode;
-  tone?: "neutral" | "signal" | "up" | "down" | "india" | "usa";
+  tone?: "neutral" | "signal" | "up" | "down" | "india" | "usa" | "crypto";
   className?: string;
 }) {
   const tones = {
@@ -375,6 +379,7 @@ export function Badge({
     down: "border-down/35 text-down bg-down/8",
     india: "border-india/35 text-india bg-india/8",
     usa: "border-usa/35 text-usa bg-usa/8",
+    crypto: "border-crypto/35 text-crypto bg-crypto/8",
   } as const;
 
   return (

@@ -30,8 +30,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const { data, source, notice } = await getQuotes(parsed.data.symbols);
-    const body: ApiEnvelope<Quote[]> = { data, source, asOf: Date.now(), notice };
+    const { data, source, notice, providers } = await getQuotes(parsed.data.symbols);
+    const body: ApiEnvelope<Quote[]> = { data, source, asOf: Date.now(), notice, providers };
 
     return NextResponse.json(body, {
       headers: {

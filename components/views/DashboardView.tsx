@@ -14,6 +14,7 @@ import { SessionDial } from "@/components/market/SessionDial";
 import { QuoteTable } from "@/components/market/QuoteTable";
 import { DataSourceNotice } from "@/components/market/DataSourceNotice";
 import { Badge, Button, Panel, PanelHeader, Segmented, EmptyState } from "@/components/ui/primitives";
+import { NewsPanel } from "@/components/market/NewsFeed";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { usePersonal } from "@/lib/store/personal";
 import { useQuotes } from "@/lib/hooks/market-data";
@@ -77,20 +78,42 @@ export function DashboardView({
         }
       />
 
-      <PageBody className="space-y-5">
+      <PageBody className="space-y-4 sm:space-y-5">
         {/* Index rail */}
         <IndexStrip seeds={seeds} columns={3} className="grid-cols-2 sm:grid-cols-3 lg:grid-cols-6" />
 
-        <div className="grid gap-5 xl:grid-cols-[1fr_356px]">
+        {/* Crypto rail — the one market still open when both others are dark. */}
+        {overview.crypto.length > 0 && (
+          <Panel flush>
+            <PanelHeader
+              title="Digital assets"
+              subtitle="Always trading"
+              action={
+                <Link href="/markets">
+                  <Button variant="ghost" size="sm" icon={<IconArrowRight />}>
+                    Markets
+                  </Button>
+                </Link>
+              }
+            />
+            <QuoteTable
+              symbols={overview.crypto.slice(0, 6).map((q) => q.slug)}
+              defaultSort="change"
+              compact
+            />
+          </Panel>
+        )}
+
+        <div className="grid min-w-0 gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_356px]">
           {/* ── Left column ─────────────────────────────────────────────── */}
-          <div className="min-w-0 space-y-5">
+          <div className="min-w-0 space-y-4 sm:space-y-5">
             {/* Breadth */}
             <Panel flush>
               <PanelHeader
                 title="Market breadth"
                 subtitle="Participation behind the headline index move"
               />
-              <div className="grid gap-6 p-5 sm:grid-cols-2 sm:gap-8">
+              <div className="grid gap-7 p-4 sm:grid-cols-2 sm:gap-8 sm:p-5">
                 <BreadthMeter breadth={overview.breadth.IN} />
                 <BreadthMeter breadth={overview.breadth.US} />
               </div>
@@ -132,7 +155,7 @@ export function DashboardView({
           </div>
 
           {/* ── Right column ────────────────────────────────────────────── */}
-          <div className="space-y-5">
+          <div className="min-w-0 space-y-4 sm:space-y-5">
             <Panel>
               <p className="label-micro mb-5 text-ivory-40">Sessions</p>
               <SessionDial compact className="justify-center" />
@@ -201,6 +224,13 @@ export function DashboardView({
                 <CompactWatchlist symbols={watchSymbols.slice(0, 7)} />
               )}
             </Panel>
+
+            <NewsPanel
+              slug={null}
+              limit={5}
+              title="Headlines"
+              subtitle="Market-wide"
+            />
           </div>
         </div>
       </PageBody>

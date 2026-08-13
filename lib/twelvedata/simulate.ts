@@ -1,6 +1,6 @@
 import { hashCode } from "@/lib/utils";
 import type { Instrument } from "@/lib/market/universe";
-import { EXCHANGES } from "@/lib/market/exchanges";
+import { EXCHANGES, type Region } from "@/lib/market/exchanges";
 import { zoneOffsetMs } from "@/lib/market/timezone";
 import type { Candle, Interval, Quote, RangeKey, Series } from "@/lib/twelvedata/types";
 import { RANGE_SPEC } from "@/lib/twelvedata/types";
@@ -83,8 +83,16 @@ function globalFactor(td: number): number {
   return fbm(SEED_GLOBAL, td / 34, 4);
 }
 
+const SEED_MARKET_CRYPTO = hashCode("meridian:market:CRYPTO");
+
 /** Regional index factor. Correlated with the global tide but not identical. */
-function marketFactor(region: "IN" | "US", td: number): number {
+function marketFactor(region: Region, td: number): number {
+  if (region === "GLOBAL") {
+    // Crypto tracks risk appetite far more loosely than equity does, and on a
+    // shorter cycle — so it gets a fast local factor and only a light coupling
+    // to the global tide.
+    return 0.82 * fbm(SEED_MARKET_CRYPTO, td / 6.5, 6) + 0.18 * globalFactor(td);
+  }
   const seed = region === "IN" ? SEED_MARKET_IN : SEED_MARKET_US;
   const local = fbm(seed, td / 11, 5);
   // India carries a structurally higher drift and a fatter local component;
@@ -96,9 +104,17 @@ function sectorFactor(sector: string, region: string, td: number): number {
   return fbm(hashCode(`sector:${sector}:${region}`), td / 8.5, 4);
 }
 
-/** Per-name annualised volatility, inferred from size. */
+/** Per-name annualised volatility, inferred from size and asset class. */
 function volatilityOf(inst: Instrument): number {
   if (inst.kind === "index") return 0.13;
+  // Digital assets run three to five times equity volatility. Simulating them
+  // on an equity vol surface produces a curve that reads obviously wrong to
+  // anyone who has looked at a crypto chart.
+  if (inst.kind === "crypto") {
+    if (inst.seedCap > 5e11) return 0.55; // BTC, ETH
+    if (inst.seedCap > 5e10) return 0.75;
+    return 0.95;
+  }
   const capUsd = inst.currency === "INR" ? inst.seedCap / 88 : inst.seedCap;
   if (capUsd > 1e12) return 0.26;
   if (capUsd > 3e11) return 0.30;
@@ -161,6 +177,13 @@ function roundTick(p: number): number {
  * exchange's own clock. Weekends roll back to Friday.
  */
 function sessionAnchors(inst: Instrument, now: number): { open: number; prevClose: number } {
+  // Crypto has no session. The 24-hour-ago price is the honest analogue of
+  // both the open and the previous close, and is what every venue displays.
+  if (inst.kind === "crypto") {
+    const dayAgo = now - DAY_MS;
+    return { open: dayAgo, prevClose: dayAgo };
+  }
+
   const ex = EXCHANGES[inst.exchange];
   const offsetMs = zoneOffsetMs(ex.timezone, now);
   const localNow = now + offsetMs;
@@ -219,7 +242,9 @@ export function simulateQuote(inst: Instrument, now: number = Date.now()): Quote
   }
 
   const vol = volatilityOf(inst);
-  const baseTurnover = inst.kind === "index" ? 0 : inst.seedCap * 0.0022;
+  // Crypto turns over a far larger share of its cap daily than equity does.
+  const turnoverRate = inst.kind === "crypto" ? 0.035 : 0.0022;
+  const baseTurnover = inst.kind === "index" ? 0 : inst.seedCap * turnoverRate;
   const volume =
     inst.kind === "index"
       ? 0
@@ -246,7 +271,7 @@ export function simulateQuote(inst: Instrument, now: number = Date.now()): Quote
     fiftyTwoWeekPosition: hi > lo ? (price - lo) / (hi - lo) : null,
     marketCap: inst.kind === "index" ? null : Math.round(inst.seedCap * (price / inst.seedPrice)),
     timestamp: now,
-    isOpen: false,
+    isOpen: inst.kind === "crypto",
     source: "simulated",
   };
 }

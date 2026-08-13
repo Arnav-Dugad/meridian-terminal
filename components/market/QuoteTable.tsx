@@ -106,8 +106,10 @@ export function QuoteTable({
   }
 
   return (
-    <div className={cn("w-full overflow-x-auto", className)}>
-      <table className="w-full min-w-[560px] border-collapse">
+    // `min-w-0` on the wrapper is what keeps the scroll *inside* the table
+    // instead of the table widening its grid or flex parent.
+    <div className={cn("table-scroll w-full min-w-0", className)}>
+      <table className="w-full min-w-[500px] border-collapse">
         <thead>
           <tr className="border-b border-line">
             {COLUMNS.map((col) => (

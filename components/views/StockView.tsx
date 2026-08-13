@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
 
 import { PageBody, PageHeader } from "@/components/shell/PageHeader";
@@ -8,6 +8,18 @@ import { PriceChart, INDICATOR_CATALOGUE } from "@/components/chart/PriceChart";
 import { RangeBar } from "@/components/market/RangeBar";
 import { DataSourceNotice } from "@/components/market/DataSourceNotice";
 import { AlertComposer } from "@/components/market/AlertComposer";
+import { NewsPanel } from "@/components/market/NewsFeed";
+import {
+  AnalystPanel,
+  EarningsPanel,
+  FundamentalsPanel,
+  PeersPanel,
+} from "@/components/market/ResearchPanels";
+import type {
+  AnalystConsensus,
+  EarningsPoint,
+  Fundamentals,
+} from "@/lib/providers/types";
 import {
   Badge,
   Button,
@@ -70,9 +82,12 @@ export function StockView({
 
   const [range, setRange] = useState<RangeKey>(initialSeries.range);
   const [composerOpen, setComposerOpen] = useState(false);
+  const chartHeight = useResponsiveChartHeight();
 
   const { quote: liveQuote } = useQuote(slug);
   const quote = liveQuote ?? initialQuote;
+
+  const research = useResearch(slug, instrument?.kind === "equity");
 
   const { series, loading } = useSeries(slug, range, initialSeries);
   const candles = series?.candles ?? initialSeries.candles;
@@ -185,38 +200,45 @@ export function StockView({
 
       <PageBody className="space-y-5">
         {/* ── Price header ─────────────────────────────────────────────── */}
-        <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
-          <div>
-            <p className="num-mono text-[42px] leading-none tracking-tight text-ivory sm:text-[52px]">
+        <div className="flex flex-wrap items-end gap-x-8 gap-y-5">
+          <div className="min-w-0">
+            {/* Clamped rather than stepped: a six-figure index print and a
+                sub-dollar coin both have to fit the same slot. */}
+            <p className="num-mono text-[clamp(2rem,9vw,3.25rem)] leading-none tracking-tight text-ivory">
               <AnimatedNumber value={quote.price} format={(v) => formatPrice(v, currency)} flash />
             </p>
-            <div className="mt-3 flex flex-wrap items-center gap-2.5">
+            <div className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
               <Delta
                 value={quote.changePercent}
                 absolute={`${quote.change >= 0 ? "+" : ""}${formatPrice(quote.change, currency, { withSymbol: false })}`}
                 size="lg"
               />
               <span className="text-[12px] text-ivory-40">
-                vs previous close {formatPrice(quote.previousClose, currency)}
+                {instrument?.kind === "crypto" ? "over 24 hours" : "vs previous close"}{" "}
+                {formatPrice(quote.previousClose, currency)}
               </span>
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-x-8 gap-y-4">
-            <MiniStat label="Open" value={formatPrice(quote.open, currency)} />
-            <MiniStat label="Day high" value={formatPrice(quote.dayHigh, currency)} />
-            <MiniStat label="Day low" value={formatPrice(quote.dayLow, currency)} />
+          {/* A two-column grid on phones instead of a row that overflows. */}
+          <dl className="grid w-full grid-cols-2 gap-x-6 gap-y-4 sm:w-auto sm:flex sm:flex-wrap sm:gap-x-8">
+            <MiniStat
+              label={instrument?.kind === "crypto" ? "24h open" : "Open"}
+              value={formatPrice(quote.open, currency)}
+            />
+            <MiniStat label="High" value={formatPrice(quote.dayHigh, currency)} />
+            <MiniStat label="Low" value={formatPrice(quote.dayLow, currency)} />
             <MiniStat
               label="Volume"
               value={quote.volume > 0 ? formatCompact(quote.volume, currency) : "—"}
             />
             <MiniStat label="Market cap" value={formatCompactMoney(quote.marketCap, currency)} />
-          </div>
+          </dl>
         </div>
 
         {/* ── Chart ────────────────────────────────────────────────────── */}
         <Panel flush>
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2.5 border-b border-line px-3 py-3 sm:px-4">
             <Segmented
               value={range}
               onChange={(r) => setRange(r as RangeKey)}
@@ -224,42 +246,42 @@ export function StockView({
               options={RANGE_KEYS.map((k) => ({ value: k, label: k, title: RANGE_SPEC[k].label }))}
             />
 
-            <div className="flex flex-wrap items-center gap-2">
-              <Segmented
-                value={preferences.chartStyle}
-                onChange={(v) => setPreference("chartStyle", v as "area" | "candles")}
-                layoutIdSuffix="stock-style"
-                options={[
-                  { value: "area", label: "Area" },
-                  { value: "candles", label: "Candles" },
-                ]}
-              />
+            <Segmented
+              value={preferences.chartStyle}
+              onChange={(v) => setPreference("chartStyle", v as "area" | "candles")}
+              layoutIdSuffix="stock-style"
+              options={[
+                { value: "area", label: "Area" },
+                { value: "candles", label: "Candles" },
+              ]}
+            />
 
-              <div className="flex flex-wrap items-center gap-1">
-                {INDICATOR_CATALOGUE.map((ind) => {
-                  const active = preferences.indicators.includes(ind.id);
-                  return (
-                    <button
-                      key={ind.id}
-                      onClick={() => toggleIndicator(ind.id)}
-                      aria-pressed={active}
-                      className={cn(
-                        "label-micro-tight rounded-[3px] border px-1.5 py-1 transition-all duration-150",
-                        active
-                          ? "border-transparent text-ink-1000"
-                          : "border-line text-ivory-40 hover:border-line-bright hover:text-ivory-80",
-                      )}
-                      style={active ? { backgroundColor: ind.color } : undefined}
-                    >
-                      {ind.label}
-                    </button>
-                  );
-                })}
-              </div>
+            {/* Indicators get their own scrolling row so they never squeeze
+                the range picker onto a second line on a phone. */}
+            <div className="scroll-x -mx-1 flex w-full items-center gap-1 px-1 lg:mx-0 lg:w-auto lg:px-0">
+              {INDICATOR_CATALOGUE.map((ind) => {
+                const active = preferences.indicators.includes(ind.id);
+                return (
+                  <button
+                    key={ind.id}
+                    onClick={() => toggleIndicator(ind.id)}
+                    aria-pressed={active}
+                    className={cn(
+                      "label-micro-tight shrink-0 whitespace-nowrap rounded-[3px] border px-2 py-1.5 transition-all duration-150",
+                      active
+                        ? "border-transparent text-ink-1000"
+                        : "border-line text-ivory-40 hover:border-line-bright hover:text-ivory-80",
+                    )}
+                    style={active ? { backgroundColor: ind.color } : undefined}
+                  >
+                    {ind.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          <div className="px-2 pb-2 pt-3">
+          <div className="px-1 pb-2 pt-3 sm:px-2">
             <PriceChart
               candles={candles}
               currency={currency}
@@ -268,7 +290,7 @@ export function StockView({
               baseline={quote.previousClose}
               intraday={isIntraday}
               loading={loading}
-              height={440}
+              height={chartHeight}
             />
           </div>
         </Panel>
@@ -438,6 +460,43 @@ export function StockView({
           </Panel>
         )}
 
+        {/* ── Research ─────────────────────────────────────────────────────
+            Only equities have fundamentals, analyst coverage and earnings.
+            Rendering empty shells for an index or a coin would be noise. */}
+        {instrument?.kind === "equity" && (
+          <div className="grid gap-5 lg:grid-cols-[1.1fr_1fr]">
+            <div className="min-w-0 space-y-5">
+              <FundamentalsPanel
+                fundamentals={research.fundamentals}
+                currency={currency}
+                loading={research.loading}
+                unavailableReason={
+                  instrument.region !== "US"
+                    ? "Fundamentals come from Financial Modeling Prep and Finnhub, whose free tiers cover US listings. Indian listings are not included."
+                    : undefined
+                }
+              />
+              <EarningsPanel earnings={research.earnings} loading={research.loading} />
+            </div>
+
+            <div className="min-w-0 space-y-5">
+              <AnalystPanel
+                consensus={research.recommendations}
+                currentPrice={quote.price}
+                currency={currency}
+                loading={research.loading}
+              />
+              <PeersPanel peers={research.peers} loading={research.loading} />
+              <NewsPanel
+                slug={slug}
+                limit={6}
+                title="Recent news"
+                subtitle={`Headlines mentioning ${quote.symbol}`}
+              />
+            </div>
+          </div>
+        )}
+
         {/* ── Profile ──────────────────────────────────────────────────── */}
         {profile && (profile.description || profile.industry) && (
           <Panel flush>
@@ -483,6 +542,114 @@ export function StockView({
       />
     </>
   );
+}
+
+/**
+ * Chart height by viewport.
+ *
+ * A fixed 440px chart occupies most of a phone screen and pushes everything
+ * below it out of reach, while on a desktop it is smaller than it should be.
+ * Measured rather than done with CSS because the canvas engine needs a real
+ * pixel height, not a percentage.
+ */
+function useResponsiveChartHeight(): number {
+  const [height, setHeight] = useState(420);
+
+  useEffect(() => {
+    const compute = () => {
+      const w = window.innerWidth;
+      if (w < 480) return 260;
+      if (w < 768) return 320;
+      if (w < 1280) return 380;
+      return 460;
+    };
+    const apply = () => setHeight(compute());
+    apply();
+    window.addEventListener("resize", apply, { passive: true });
+    window.addEventListener("orientationchange", apply);
+    return () => {
+      window.removeEventListener("resize", apply);
+      window.removeEventListener("orientationchange", apply);
+    };
+  }, []);
+
+  return height;
+}
+
+/* ── Research loader ──────────────────────────────────────────────────────── */
+
+interface ResearchState {
+  fundamentals: Fundamentals | null;
+  recommendations: AnalystConsensus | null;
+  earnings: EarningsPoint[];
+  peers: string[];
+  loading: boolean;
+}
+
+/**
+ * One request for the whole research column.
+ *
+ * Loaded on the client rather than in the server component deliberately: these
+ * panels sit below the fold, and blocking the page's first paint on a
+ * fundamentals lookup would trade a visible improvement for an invisible one.
+ */
+function useResearch(slug: string, enabled: boolean): ResearchState {
+  const [state, setState] = useState<ResearchState>({
+    fundamentals: null,
+    recommendations: null,
+    earnings: [],
+    peers: [],
+    loading: enabled,
+  });
+
+  useEffect(() => {
+    if (!enabled) {
+      setState({ fundamentals: null, recommendations: null, earnings: [], peers: [], loading: false });
+      return;
+    }
+
+    const controller = new AbortController();
+    let cancelled = false;
+    setState((s) => ({ ...s, loading: true }));
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/fundamentals?symbol=${encodeURIComponent(slug)}`, {
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`research ${res.status}`);
+
+        const body = (await res.json()) as {
+          data: {
+            fundamentals: Fundamentals | null;
+            recommendations: AnalystConsensus | null;
+            earnings: EarningsPoint[];
+            peers: string[];
+          };
+        };
+        if (cancelled) return;
+        setState({ ...body.data, loading: false });
+      } catch (err) {
+        if (cancelled || (err instanceof Error && err.name === "AbortError")) return;
+        // Each panel renders its own "unavailable" state, so an empty result
+        // is a complete answer rather than an error to surface.
+        setState({
+          fundamentals: null,
+          recommendations: null,
+          earnings: [],
+          peers: [],
+          loading: false,
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [slug, enabled]);
+
+  return state;
 }
 
 /* ── Pieces ───────────────────────────────────────────────────────────────── */

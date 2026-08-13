@@ -11,6 +11,7 @@ import { SectorRotation } from "@/components/market/SectorRotation";
 import { SessionDial } from "@/components/market/SessionDial";
 import { QuoteTable } from "@/components/market/QuoteTable";
 import { DataSourceNotice } from "@/components/market/DataSourceNotice";
+import { ProviderAttribution } from "@/components/market/ProviderAttribution";
 import { Badge, Panel, PanelHeader, Segmented } from "@/components/ui/primitives";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { instrumentsByRegion } from "@/lib/market/universe";
@@ -26,13 +27,14 @@ export function MarketsView({
 }) {
   const [region, setRegion] = useState<Region>("IN");
 
-  // The constituent table is capped: each visible symbol is a credit, and a
-  // 130-row table would cost more than the information is worth.
+  // Capped per region: each visible symbol is a provider call, and a 130-row
+  // table costs more than the extra rows are worth. Crypto is uncapped by
+  // comparison because CoinGecko batches the whole set into one request.
   const constituents = useMemo(
     () =>
       instrumentsByRegion(region)
         .sort((a, b) => b.seedCap - a.seedCap)
-        .slice(0, 40)
+        .slice(0, region === "GLOBAL" ? 18 : 40)
         .map((i) => i.slug),
     [region],
   );
@@ -96,11 +98,14 @@ export function MarketsView({
         <Panel flush>
           <PanelHeader
             title="Constituents"
-            subtitle={`Largest ${constituents.length} names by capitalisation`}
+            subtitle={`Largest ${constituents.length} by capitalisation`}
             action={
-              <div className="flex items-center gap-2">
-                <Badge tone={region === "IN" ? "india" : "usa"}>
-                  {region === "IN" ? "NSE" : "US"}
+              <div className="flex min-w-0 items-center gap-2">
+                <Badge
+                  tone={region === "IN" ? "india" : region === "GLOBAL" ? "crypto" : "usa"}
+                  className="hidden sm:inline-flex"
+                >
+                  {region === "IN" ? "NSE" : region === "GLOBAL" ? "24/7" : "US"}
                 </Badge>
                 <Segmented
                   value={region}
@@ -108,7 +113,8 @@ export function MarketsView({
                   layoutIdSuffix="markets-region"
                   options={[
                     { value: "IN", label: "India" },
-                    { value: "US", label: "United States" },
+                    { value: "US", label: "US" },
+                    { value: "GLOBAL", label: "Crypto" },
                   ]}
                 />
               </div>
@@ -116,6 +122,26 @@ export function MarketsView({
           />
           <QuoteTable symbols={constituents} defaultSort="turnover" />
         </Panel>
+
+        {/* Digital assets get their own strip rather than being folded into
+            the index rail — a 24/7 asset class alongside session-bound indices
+            invites the wrong comparison. */}
+        {overview.crypto.length > 0 && (
+          <Panel flush>
+            <PanelHeader
+              title="Digital assets"
+              subtitle="Trading continuously — the one market that is never closed"
+              action={<Badge tone="crypto">24/7</Badge>}
+            />
+            <QuoteTable
+              symbols={overview.crypto.map((q) => q.slug)}
+              defaultSort="turnover"
+              compact
+            />
+          </Panel>
+        )}
+
+        <ProviderAttribution />
       </PageBody>
     </>
   );

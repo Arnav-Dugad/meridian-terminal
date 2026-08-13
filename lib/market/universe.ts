@@ -25,12 +25,13 @@ export type Sector =
   | "Utilities"
   | "Communication"
   | "Real Estate"
-  | "Index";
+  | "Index"
+  | "Crypto";
 
 export interface Instrument {
-  /** Canonical Twelve Data symbol. */
+  /** Provider-facing ticker. */
   symbol: string;
-  /** Route key: `RELIANCE.NSE`, `AAPL`, `NIFTY50`. */
+  /** Route key: `RELIANCE.NSE`, `AAPL`, `NIFTY50`, `BTC`. */
   slug: string;
   name: string;
   exchange: ExchangeCode;
@@ -41,7 +42,13 @@ export interface Instrument {
   seedPrice: number;
   /** Seed market cap in native currency -- simulation layer only. */
   seedCap: number;
-  kind: "equity" | "index";
+  kind: "equity" | "index" | "crypto";
+  /**
+   * CoinGecko's own id. Required for crypto because CoinGecko keys on a slug
+   * ("bitcoin"), not a ticker -- and tickers collide across chains in a way
+   * that ids do not.
+   */
+  coinId?: string;
 }
 
 type Row = [symbol: string, name: string, sector: Sector, seedPrice: number, seedCapNative: number];
@@ -190,6 +197,36 @@ const NYSE_ROWS: Row[] = [
   ["NEE", "NextEra Energy", "Utilities", 72, 1.48e11],
 ];
 
+/* -- Digital assets -------------------------------------------------------- */
+interface CryptoRow {
+  symbol: string;
+  coinId: string;
+  name: string;
+  seedPrice: number;
+  seedCap: number;
+}
+
+const CRYPTO_ROWS: CryptoRow[] = [
+  { symbol: "BTC", coinId: "bitcoin", name: "Bitcoin", seedPrice: 96_400, seedCap: 1.91e12 },
+  { symbol: "ETH", coinId: "ethereum", name: "Ethereum", seedPrice: 3_280, seedCap: 3.95e11 },
+  { symbol: "SOL", coinId: "solana", name: "Solana", seedPrice: 184, seedCap: 8.86e10 },
+  { symbol: "BNB", coinId: "binancecoin", name: "BNB", seedPrice: 672, seedCap: 9.71e10 },
+  { symbol: "XRP", coinId: "ripple", name: "XRP", seedPrice: 2.28, seedCap: 1.31e11 },
+  { symbol: "ADA", coinId: "cardano", name: "Cardano", seedPrice: 0.86, seedCap: 3.06e10 },
+  { symbol: "DOGE", coinId: "dogecoin", name: "Dogecoin", seedPrice: 0.31, seedCap: 4.58e10 },
+  { symbol: "AVAX", coinId: "avalanche-2", name: "Avalanche", seedPrice: 36.4, seedCap: 1.49e10 },
+  { symbol: "LINK", coinId: "chainlink", name: "Chainlink", seedPrice: 21.8, seedCap: 1.37e10 },
+  { symbol: "DOT", coinId: "polkadot", name: "Polkadot", seedPrice: 6.42, seedCap: 9.4e9 },
+  { symbol: "MATIC", coinId: "matic-network", name: "Polygon", seedPrice: 0.48, seedCap: 4.6e9 },
+  { symbol: "LTC", coinId: "litecoin", name: "Litecoin", seedPrice: 104, seedCap: 7.9e9 },
+  { symbol: "TRX", coinId: "tron", name: "TRON", seedPrice: 0.24, seedCap: 2.07e10 },
+  { symbol: "ATOM", coinId: "cosmos", name: "Cosmos", seedPrice: 6.9, seedCap: 2.7e9 },
+  { symbol: "UNI", coinId: "uniswap", name: "Uniswap", seedPrice: 13.2, seedCap: 7.9e9 },
+  { symbol: "NEAR", coinId: "near", name: "NEAR Protocol", seedPrice: 5.1, seedCap: 6.1e9 },
+  { symbol: "APT", coinId: "aptos", name: "Aptos", seedPrice: 9.4, seedCap: 5.8e9 },
+  { symbol: "ARB", coinId: "arbitrum", name: "Arbitrum", seedPrice: 0.79, seedCap: 3.4e9 },
+];
+
 /* -- Indices --------------------------------------------------------------- */
 interface IndexRow {
   symbol: string;
@@ -247,7 +284,21 @@ export const EQUITIES: Instrument[] = [
   ...build(NYSE_ROWS, "NYSE"),
 ];
 
-export const UNIVERSE: Instrument[] = [...INDICES, ...EQUITIES];
+export const CRYPTO: Instrument[] = CRYPTO_ROWS.map((r) => ({
+  symbol: r.symbol,
+  slug: r.symbol,
+  name: r.name,
+  exchange: "CRYPTO" as const,
+  region: "GLOBAL" as const,
+  currency: "USD" as const,
+  sector: "Crypto" as const,
+  seedPrice: r.seedPrice,
+  seedCap: r.seedCap,
+  kind: "crypto" as const,
+  coinId: r.coinId,
+}));
+
+export const UNIVERSE: Instrument[] = [...INDICES, ...EQUITIES, ...CRYPTO];
 
 const BY_SLUG = new Map<string, Instrument>();
 const BY_SYMBOL = new Map<string, Instrument>();
@@ -297,6 +348,7 @@ export const SECTOR_HUE: Record<Sector, string> = {
   Utilities: "#6b8f71",
   "Real Estate": "#e08a5f",
   Index: "#f4f2ec",
+  Crypto: "#4fd1c5",
 };
 
 /** Instrument pages worth pre-rendering at build time. */
@@ -304,16 +356,23 @@ export const FEATURED_SLUGS: string[] = [
   "NIFTY50", "SENSEX", "SPX", "IXIC",
   "RELIANCE.NSE", "TCS.NSE", "HDFCBANK.NSE", "INFY.NSE", "ICICIBANK.NSE",
   "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "TSLA", "META",
+  "BTC", "ETH", "SOL",
 ];
 
 /** The tape shown to signed-out visitors and brand-new accounts. */
 export const DEFAULT_WATCHLIST: string[] = [
   "RELIANCE.NSE", "TCS.NSE", "HDFCBANK.NSE", "INFY.NSE", "TATAMOTORS.NSE",
   "AAPL", "NVDA", "MSFT", "TSLA", "AMZN",
+  "BTC", "ETH",
 ];
 
+/**
+ * Equities only. Crypto lives in its own region and is excluded deliberately —
+ * a 24/7 asset class has no place in an advance-decline line computed against
+ * a session that opens and closes.
+ */
 export function instrumentsByRegion(region: Region): Instrument[] {
-  return EQUITIES.filter((i) => i.region === region);
+  return region === "GLOBAL" ? CRYPTO : EQUITIES.filter((i) => i.region === region);
 }
 
 export function indicesByRegion(region: Region): Instrument[] {
@@ -348,7 +407,10 @@ export function searchUniverse(query: string, limit = 12): Instrument[] {
     }
 
     if (score > 0) {
+      // Indices and the major coins float above equities on ties: someone
+      // typing "S" more often wants SPX than SBUX.
       if (inst.kind === "index") score += 60;
+      if (inst.kind === "crypto") score += 40;
       scored.push({ inst, score });
     }
   }

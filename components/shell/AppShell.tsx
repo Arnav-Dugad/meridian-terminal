@@ -10,6 +10,7 @@ import { useAuth } from "@/lib/firebase/auth-context";
 import { usePersonal } from "@/lib/store/personal";
 import { useCommandPalette } from "@/components/shell/CommandPalette";
 import { AlertWatcher } from "@/components/shell/AlertWatcher";
+import { ShortcutsOverlay } from "@/components/shell/ShortcutsOverlay";
 import { Glyph } from "@/components/brand/Wordmark";
 import { Tape } from "@/components/market/Tape";
 import { MarketClocks } from "@/components/shell/MarketClocks";
@@ -22,6 +23,7 @@ import {
   IconFilter,
   IconGlobe,
   IconLogout,
+  IconNews,
   IconPulse,
   IconScale,
   IconSearch,
@@ -48,10 +50,18 @@ const NAV = [
   { href: "/markets", label: "Markets", icon: <IconGlobe /> },
   { href: "/screener", label: "Screener", icon: <IconFilter /> },
   { href: "/compare", label: "Compare", icon: <IconScale /> },
+  { href: "/news", label: "Newsroom", icon: <IconNews /> },
   { href: "/watchlist", label: "Watchlist", icon: <IconStar /> },
   { href: "/portfolio", label: "Portfolio", icon: <IconBriefcase /> },
   { href: "/alerts", label: "Alerts", icon: <IconBell /> },
 ];
+
+/**
+ * The five that earn a permanent slot on a phone. Everything else stays one
+ * tap away through the palette, which the topbar keeps visible at all times —
+ * better than a cramped eight-item bar where every target is too small.
+ */
+const MOBILE_NAV = ["/dashboard", "/markets", "/watchlist", "/portfolio", "/alerts"];
 
 const RAIL_KEY = "meridian.rail.collapsed";
 
@@ -86,8 +96,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const tapeSymbols = watchlist.length > 0 ? watchlist.slice(0, 24) : DEFAULT_WATCHLIST;
 
   return (
-    <div className="flex min-h-dvh flex-col bg-ink-950">
+    <div className="flex min-h-dvh flex-col overflow-x-hidden bg-ink-950">
       <AlertWatcher />
+      <ShortcutsOverlay />
 
       <div className="flex flex-1">
         {/* ── Rail ────────────────────────────────────────────────────────── */}
@@ -178,7 +189,13 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="flex min-w-0 flex-1 flex-col">
           <Topbar />
 
-          <main id="main" className="min-w-0 flex-1 pb-11">
+          {/*
+            `min-w-0` is load-bearing: without it a flex child adopts its
+            content's intrinsic width, so one wide table pushes the whole
+            column past the viewport and the page scrolls sideways. This is the
+            single most common cause of horizontal bleed in a flex layout.
+          */}
+          <main id="main" className="pb-chrome min-w-0 flex-1 overflow-x-hidden">
             {mounted ? (
               children
             ) : (
@@ -190,13 +207,16 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </div>
 
-      {/* ── Tape ──────────────────────────────────────────────────────────── */}
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-ink-1000/92 backdrop-blur-md">
-        <Tape symbols={tapeSymbols} speed={1.15} />
+      {/* ── Bottom chrome ─────────────────────────────────────────────────
+          Tape and mobile nav are stacked in one fixed container rather than
+          positioned independently. Two separately-offset fixed bars is how
+          they end up overlapping the moment either changes height. */}
+      <div className="safe-bottom fixed inset-x-0 bottom-0 z-30">
+        <MobileNav pathname={pathname} activeAlerts={activeAlerts} />
+        <div className="border-t border-line bg-ink-1000/92 backdrop-blur-md">
+          <Tape symbols={tapeSymbols} speed={1.15} />
+        </div>
       </div>
-
-      {/* ── Mobile nav ────────────────────────────────────────────────────── */}
-      <MobileNav pathname={pathname} activeAlerts={activeAlerts} />
     </div>
   );
 }
@@ -334,11 +354,13 @@ function AccountMenu() {
 /* ── Mobile navigation ────────────────────────────────────────────────────── */
 
 function MobileNav({ pathname, activeAlerts }: { pathname: string; activeAlerts: number }) {
-  const items = NAV.slice(0, 5);
+  const items = MOBILE_NAV.map((href) => NAV.find((n) => n.href === href)).filter(
+    (n): n is (typeof NAV)[number] => Boolean(n),
+  );
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-[38px] z-30 flex border-t border-line bg-ink-1000/95 backdrop-blur-md md:hidden"
+      className="tap-none flex border-t border-line bg-ink-1000/95 backdrop-blur-md md:hidden"
       aria-label="Sections"
     >
       {items.map((item) => {
@@ -347,24 +369,27 @@ function MobileNav({ pathname, activeAlerts }: { pathname: string; activeAlerts:
           <Link
             key={item.href}
             href={item.href}
+            aria-current={active ? "page" : undefined}
+            // min-h-[52px] keeps every target comfortably past the 44px floor.
             className={cn(
-              "relative flex flex-1 flex-col items-center gap-1 py-2.5 transition-colors",
-              active ? "text-signal" : "text-ivory-40",
+              "relative flex min-h-[52px] flex-1 flex-col items-center justify-center gap-1 px-1 py-2 transition-colors",
+              active ? "text-signal" : "text-ivory-40 active:text-ivory-80",
             )}
           >
             {active && (
               <motion.span
                 layoutId="mobile-active"
                 className="absolute inset-x-3 top-0 h-[2px] rounded-full bg-signal"
+                transition={{ type: "spring", stiffness: 380, damping: 32 }}
               />
             )}
             <span className="relative">
               {item.icon}
               {item.href === "/alerts" && activeAlerts > 0 && (
-                <span className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-signal" />
+                <span className="absolute -right-1.5 -top-1 h-1.5 w-1.5 rounded-full bg-signal" />
               )}
             </span>
-            <span className="label-micro-tight">{item.label}</span>
+            <span className="label-micro-tight max-w-full truncate">{item.label}</span>
           </Link>
         );
       })}

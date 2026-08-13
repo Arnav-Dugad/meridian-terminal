@@ -220,6 +220,27 @@ export const IconCommand = (p: IconProps) => (
   </Icon>
 );
 
+export const IconNews = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M11.4 3.4H2.6a1 1 0 0 0-1 1v7.4a1.2 1.2 0 0 0 1.2 1.2h9.6a1.2 1.2 0 0 0 1.2-1.2V5.6a1 1 0 0 0-1-1h-1.2v7.2" />
+    <path d="M4 6.2h5M4 8.6h5M4 11h3.4" />
+  </Icon>
+);
+
+export const IconCoin = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="8" cy="8" r="6.2" />
+    <path d="M8 4.2v7.6M6.1 6.1h3.1a1.4 1.4 0 0 1 0 2.8H6.1h3.3a1.4 1.4 0 0 1 0 2.8H6.1" />
+  </Icon>
+);
+
+export const IconKeyboard = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="1.4" y="4" width="13.2" height="8" rx="1.2" />
+    <path d="M4 6.6h.01M6.4 6.6h.01M8.8 6.6h.01M11.2 6.6h.01M4 9.4h7.2" />
+  </Icon>
+);
+
 export const IconSpark = (p: IconProps) => (
   <Icon {...p}>
     <path d="M8 1.4 9.4 6l4.6 1.4L9.4 8.8 8 13.4 6.6 8.8 2 7.4 6.6 6 8 1.4Z" />

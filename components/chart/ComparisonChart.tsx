@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
 
 import type { Candle } from "@/lib/twelvedata/types";
@@ -82,19 +82,41 @@ export function ComparisonChart({
     return { lines, min, max, points, timestamps };
   }, [series]);
 
-  // Measure once per layout change; ResizeObserver is overkill for a chart
-  // that already re-renders when its data changes.
-  const measure = (node: HTMLDivElement | null) => {
-    containerRef.current = node;
-    if (node) {
-      const w = node.getBoundingClientRect().width;
-      if (w > 0 && Math.abs(w - width) > 1) setWidth(w);
-    }
-  };
+  /**
+   * Track the container's width for the whole lifetime of the chart.
+   *
+   * The original version measured once in a ref callback, which meant the SVG
+   * kept its mount-time viewBox forever: rotating a phone, opening the rail,
+   * or resizing a window left the chart drawn at the old width and clipped or
+   * letterboxed. A ResizeObserver is the only thing that catches all three,
+   * because two of them never fire a window resize event.
+   */
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+
+    const apply = (w: number) => {
+      // Sub-pixel churn would re-render on every scroll on some browsers.
+      if (w > 0) setWidth((prev) => (Math.abs(w - prev) > 1 ? w : prev));
+    };
+
+    apply(node.getBoundingClientRect().width);
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) apply(entry.contentRect.width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   if (!model) {
     return (
-      <div className={cn("flex items-center justify-center", className)} style={{ height }}>
+      <div
+        ref={containerRef}
+        className={cn("flex items-center justify-center", className)}
+        style={{ height }}
+      >
         <p className="label-micro text-ivory-40">Not enough history to compare</p>
       </div>
     );
@@ -112,12 +134,13 @@ export function ComparisonChart({
   const ticks = niceTicks(model.min, model.max, 5);
 
   return (
-    <div ref={measure} className={cn("relative w-full", className)} style={{ height }}>
+    <div ref={containerRef} className={cn("relative w-full", className)} style={{ height }}>
       <svg
         width="100%"
         height={height}
         viewBox={`0 0 ${width} ${height}`}
         preserveAspectRatio="none"
+        className="touch-none"
         role="img"
         aria-label={`Rebased performance comparison of ${model.lines.map((l) => l.label).join(", ")}`}
         onPointerMove={(e) => {

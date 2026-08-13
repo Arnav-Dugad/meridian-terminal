@@ -10,8 +10,8 @@ import type { Currency } from "@/lib/format";
  * tick smoothly.
  */
 
-export type ExchangeCode = "NSE" | "BSE" | "NASDAQ" | "NYSE";
-export type Region = "IN" | "US";
+export type ExchangeCode = "NSE" | "BSE" | "NASDAQ" | "NYSE" | "CRYPTO";
+export type Region = "IN" | "US" | "GLOBAL";
 
 export interface ExchangeMeta {
   code: ExchangeCode;
@@ -87,10 +87,38 @@ export const EXCHANGES: Record<ExchangeCode, ExchangeMeta> = {
     tradingDays: [1, 2, 3, 4, 5],
     flagAccent: "#7ba7f0",
   },
+  // Not an exchange so much as a venue class. Modelled here so crypto flows
+  // through the same session, currency and routing machinery as equities
+  // instead of needing a parallel code path everywhere.
+  CRYPTO: {
+    code: "CRYPTO",
+    name: "Digital assets",
+    region: "GLOBAL",
+    country: "Global",
+    currency: "USD",
+    timezone: "UTC",
+    preOpen: null,
+    open: 0,
+    close: 24 * 60,
+    postClose: null,
+    tradingDays: [1, 2, 3, 4, 5, 6, 7],
+    flagAccent: "#4fd1c5",
+  },
 };
 
-export const REGION_LABEL: Record<Region, string> = { IN: "India", US: "United States" };
-export const REGION_ACCENT: Record<Region, string> = { IN: "#f0a63c", US: "#7ba7f0" };
+export const REGION_LABEL: Record<Region, string> = {
+  IN: "India",
+  US: "United States",
+  GLOBAL: "Digital assets",
+};
+export const REGION_ACCENT: Record<Region, string> = {
+  IN: "#f0a63c",
+  US: "#7ba7f0",
+  GLOBAL: "#4fd1c5",
+};
+
+/** Regions that represent a scheduled equity market. */
+export const EQUITY_REGIONS: Region[] = ["IN", "US"];
 
 export function currencyForExchange(code: ExchangeCode): Currency {
   return EXCHANGES[code].currency;
@@ -174,6 +202,22 @@ export function sessionState(code: ExchangeCode, now: Date = new Date()): Sessio
   const { minutes, seconds, weekday, hh, mm } = zonedParts(now, ex.timezone);
   const localTime = `${hh}:${mm}`;
   const secsIntoMinute = seconds;
+
+  // Crypto never closes, so the whole open/pre/post/weekend ladder below is
+  // meaningless for it. Short-circuit rather than encoding a 00:00–24:00
+  // window that the boundary arithmetic would then have to special-case.
+  if (code === "CRYPTO") {
+    return {
+      phase: "open",
+      label: "24/7",
+      isLive: true,
+      localMinutes: minutes,
+      localTime,
+      secondsToNextBoundary: null,
+      nextBoundaryLabel: "Always open",
+      sessionProgress: minutes / 1440,
+    };
+  }
 
   const base = {
     localMinutes: minutes,

@@ -43,6 +43,12 @@ export interface Quote {
   timestamp: number;
   isOpen: boolean;
   source: DataSource;
+  /**
+   * Which upstream produced this figure (`finnhub`, `coingecko`, …). Carried
+   * so the interface can attribute a number to its source, and so the registry
+   * knows which quotes still need enriching with fields that provider omits.
+   */
+  provider?: string;
 }
 
 export interface Candle {
@@ -136,6 +142,8 @@ export interface ApiEnvelope<T> {
   asOf: number;
   /** Set when the live provider was unavailable and we degraded. */
   notice?: string;
+  /** Upstream ids that contributed, for attribution and debugging. */
+  providers?: string[];
 }
 
 export class TwelveDataError extends Error {

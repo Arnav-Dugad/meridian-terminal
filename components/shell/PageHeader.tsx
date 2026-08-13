@@ -30,12 +30,12 @@ export function PageHeader({
   return (
     <header
       className={cn(
-        "border-b border-line bg-ink-950/60 px-4 py-6 sm:px-6 sm:py-7 lg:px-8",
+        "safe-x min-w-0 border-b border-line bg-ink-950/60 px-3.5 py-5 sm:px-6 sm:py-7 lg:px-8",
         className,
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           {eyebrow && <div className="label-micro mb-2.5 text-signal">{eyebrow}</div>}
 
           <motion.h1
@@ -58,16 +58,31 @@ export function PageHeader({
             </motion.p>
           )}
 
-          {meta && <div className="mt-4 flex flex-wrap items-center gap-2.5">{meta}</div>}
+          {meta && <div className="mt-4 flex flex-wrap items-center gap-2 sm:gap-2.5">{meta}</div>}
         </div>
 
-        {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+        {/*
+          `max-w-full` plus wrapping: on a narrow screen the action cluster
+          drops below the title instead of forcing the header wider than the
+          viewport. `min-w-0` lets any Segmented inside it scroll rather than
+          set a floor on the header's width.
+        */}
+        {actions && (
+          <div className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
+            {actions}
+          </div>
+        )}
       </div>
     </header>
   );
 }
 
-/** Standard page body gutter. */
+/** Standard page body gutter. Tighter on phones, where 16px of chrome each
+ *  side is a meaningful fraction of the usable width. */
 export function PageBody({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("px-4 py-6 sm:px-6 lg:px-8", className)}>{children}</div>;
+  return (
+    <div className={cn("safe-x min-w-0 px-3.5 py-5 sm:px-6 sm:py-6 lg:px-8", className)}>
+      {children}
+    </div>
+  );
 }

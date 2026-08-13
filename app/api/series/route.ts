@@ -28,11 +28,11 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const { data, source, notice } = await getSeries(
+    const { data, source, notice, providers } = await getSeries(
       parsed.data.symbol,
       parsed.data.range as Series["range"],
     );
-    const body: ApiEnvelope<Series> = { data, source, asOf: Date.now(), notice };
+    const body: ApiEnvelope<Series> = { data, source, asOf: Date.now(), notice, providers };
 
     const intraday = data.interval.includes("min") || data.interval === "1h";
     return NextResponse.json(body, {

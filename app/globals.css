@@ -57,6 +57,10 @@
   --color-india: #f0a63c;
   --color-usa: #7ba7f0;
   --color-usa-deep: #1f3a63;
+  /* Digital assets sit outside the East/West axis, so they get a third hue
+     rather than borrowing one and muddying the regional coding. */
+  --color-crypto: #4fd1c5;
+  --color-crypto-deep: #1b4d48;
 
   /* ── Type stacks (wired up by next/font in layout.tsx) ──────────────────*/
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -133,6 +137,13 @@
   html {
     background-color: var(--color-ink-1000);
     scroll-behavior: smooth;
+    /* Belt and braces against horizontal bleed. Any element that overflows
+       must scroll inside its own container; nothing is allowed to widen the
+       document and produce the sideways rubber-banding that makes a web app
+       feel unmistakably not-native on a phone. */
+    overflow-x: hidden;
+    /* Stops iOS Safari inflating font sizes on rotation. */
+    -webkit-text-size-adjust: 100%;
   }
 
   body {
@@ -143,6 +154,21 @@
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
     overscroll-behavior-y: none;
+    overflow-x: hidden;
+    /* `100%` rather than `100vw`: on any platform with a visible scrollbar,
+       100vw includes it and guarantees a horizontal scrollbar of its own. */
+    max-width: 100%;
+    min-height: 100dvh;
+  }
+
+  /* Media and embeds never exceed their column. */
+  img, svg, video, canvas, iframe {
+    max-width: 100%;
+  }
+
+  /* Long tickers, URLs and unbroken strings wrap rather than push. */
+  h1, h2, h3, h4, p, span, a, dd, dt, td, th, li {
+    overflow-wrap: break-word;
   }
 
   ::selection {
@@ -289,6 +315,79 @@
 
   .text-balance { text-wrap: balance; }
   .text-pretty { text-wrap: pretty; }
+
+  /* ── Native feel on touch devices ──────────────────────────────────────
+     A web app reads as native mostly through small physical details: momentum
+     scrolling, no rubber-band on fixed chrome, respect for the notch and the
+     home indicator, and no accidental text selection when swiping. */
+
+  .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .safe-top { padding-top: env(safe-area-inset-top, 0px); }
+  .safe-x {
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  /* Horizontal control strips — range pickers, filter rows, tab bars. Scrolls
+     under the finger with momentum, and the scrollbar is hidden because on a
+     32px-tall strip it is noise. */
+  .scroll-x {
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    overscroll-behavior-x: contain;
+  }
+  .scroll-x::-webkit-scrollbar { display: none; }
+
+  /* Snap points make a swiped strip land on a control rather than mid-item. */
+  .snap-strip {
+    scroll-snap-type: x proximity;
+  }
+  .snap-strip > * { scroll-snap-align: start; }
+
+  /* Data tables keep their own scroll container. */
+  .table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+
+  /* Clearance for the fixed tape, and on small screens the bottom nav too.
+     Expressed as one utility so the two chrome heights are defined in exactly
+     one place instead of being guessed at by every page. */
+  .pb-chrome {
+    padding-bottom: calc(2.5rem + env(safe-area-inset-bottom, 0px));
+  }
+  @media (max-width: 767px) {
+    .pb-chrome {
+      padding-bottom: calc(6.25rem + env(safe-area-inset-bottom, 0px));
+    }
+  }
+
+  /* Suppresses the blue flash and callout menu on tap for controls that are
+     buttons rather than text. */
+  .tap-none {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Touch targets. Anything interactive should clear ~44px on a phone even
+     when its visual box is smaller. */
+  @media (pointer: coarse) {
+    .touch-target {
+      position: relative;
+    }
+    .touch-target::after {
+      content: "";
+      position: absolute;
+      inset: 50% 50%;
+      min-width: 44px;
+      min-height: 44px;
+      transform: translate(-50%, -50%);
+    }
+  }
 
   .mask-fade-r {
     mask-image: linear-gradient(to right, #000 0%, #000 82%, transparent 100%);

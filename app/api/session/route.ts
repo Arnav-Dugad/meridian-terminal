@@ -25,7 +25,7 @@ const Body = z.object({ idToken: z.string().min(20).max(4096) });
  * localStorage would open.
  */
 export async function POST(req: NextRequest) {
-  if (!isAdminConfigured()) {
+  if (!(await isAdminConfigured())) {
     return NextResponse.json(
       { error: "Firebase Admin is not configured on the server." },
       { status: 503 },

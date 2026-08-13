@@ -1,8 +1,7 @@
 import "server-only";
 
-import { cert, getApp, getApps, initializeApp, type App } from "firebase-admin/app";
-import { getAuth, type Auth, type DecodedIdToken } from "firebase-admin/auth";
-import { getFirestore, type Firestore } from "firebase-admin/firestore";
+import type { App } from "firebase-admin/app";
+import type { Auth, DecodedIdToken } from "firebase-admin/auth";
 
 /**
  * Server-side Firebase.
@@ -13,9 +12,18 @@ import { getFirestore, type Firestore } from "firebase-admin/firestore";
  * on the server — the alternative, reading auth state in the browser and then
  * fetching, produces a visible unauthenticated flash on every navigation.
  *
- * Credentials are read from either three discrete vars or one JSON blob,
- * because the two hosting providers people actually use disagree about which
- * is convenient.
+ * ── Why every import here is dynamic ────────────────────────────────────────
+ * `firebase-admin` pulls in optional native and gRPC dependencies. A static
+ * top-level import means that if the package fails to resolve inside a
+ * serverless bundle, the *module* throws during evaluation — before any of the
+ * guard code below can run — and every route that touches it returns a bare
+ * 500 with an empty body. That is exactly what happened in production.
+ *
+ * Loading it lazily inside an async initialiser moves the failure from module
+ * evaluation into a try/catch we control, so a broken or absent Admin SDK
+ * degrades to "sessions unavailable" instead of taking down /api/health and
+ * /api/session. Only the *types* are imported statically, which erase at
+ * compile time and cost nothing at runtime.
  */
 
 interface ServiceAccount {
@@ -30,9 +38,7 @@ function readServiceAccount(): ServiceAccount | null {
     try {
       // Accept raw JSON or base64 — pasting a multi-line key into a dashboard
       // field mangles it often enough that both forms are worth supporting.
-      const text = blob.startsWith("{")
-        ? blob
-        : Buffer.from(blob, "base64").toString("utf8");
+      const text = blob.startsWith("{") ? blob : Buffer.from(blob, "base64").toString("utf8");
       const parsed = JSON.parse(text) as Record<string, string>;
       const projectId = parsed["project_id"] ?? parsed["projectId"];
       const clientEmail = parsed["client_email"] ?? parsed["clientEmail"];
@@ -55,65 +61,82 @@ function readServiceAccount(): ServiceAccount | null {
 
 /**
  * Environment files cannot hold real newlines, so private keys are stored with
- * literal `\n`. Some dashboards additionally wrap the whole value in quotes.
+ * literal `\n`. Some dashboards additionally wrap the value in quotes, and
+ * copy-paste through a terminal can leave `\r` behind — all three are common
+ * enough in practice to normalise rather than diagnose.
  */
 function normaliseKey(key: string): string {
   let k = key.trim();
   if ((k.startsWith('"') && k.endsWith('"')) || (k.startsWith("'") && k.endsWith("'"))) {
     k = k.slice(1, -1);
   }
-  return k.replace(/\\n/g, "\n");
+  return k.replace(/\\n/g, "\n").replace(/\r/g, "");
 }
 
-let cachedApp: App | null | undefined;
+/** Set once initialisation has been attempted, successful or not. */
+let initPromise: Promise<App | null> | null = null;
+let lastError: string | null = null;
 
-function adminApp(): App | null {
-  if (cachedApp !== undefined) return cachedApp;
+async function adminApp(): Promise<App | null> {
+  if (initPromise) return initPromise;
 
-  const sa = readServiceAccount();
-  if (!sa) {
-    cachedApp = null;
+  initPromise = (async () => {
+    const sa = readServiceAccount();
+    if (!sa) {
+      lastError = "no service-account credentials configured";
+      return null;
+    }
+
+    try {
+      const { cert, getApp, getApps, initializeApp } = await import("firebase-admin/app");
+      if (getApps().length) return getApp();
+
+      return initializeApp({
+        credential: cert({
+          projectId: sa.projectId,
+          clientEmail: sa.clientEmail,
+          privateKey: sa.privateKey,
+        }),
+        projectId: sa.projectId,
+      });
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : "unknown initialisation failure";
+      console.error("[firebase-admin] initialisation failed:", err);
+      return null;
+    }
+  })();
+
+  return initPromise;
+}
+
+/** Reports whether server-side auth is usable, and why not when it isn't. */
+export async function adminStatus(): Promise<{ configured: boolean; reason: string | null }> {
+  const app = await adminApp();
+  return { configured: app !== null, reason: app ? null : lastError };
+}
+
+export async function isAdminConfigured(): Promise<boolean> {
+  return (await adminApp()) !== null;
+}
+
+export async function adminAuth(): Promise<Auth | null> {
+  const app = await adminApp();
+  if (!app) return null;
+  try {
+    const { getAuth } = await import("firebase-admin/auth");
+    return getAuth(app);
+  } catch (err) {
+    console.error("[firebase-admin] getAuth failed:", err);
     return null;
   }
-
-  try {
-    cachedApp = getApps().length
-      ? getApp()
-      : initializeApp({
-          credential: cert({
-            projectId: sa.projectId,
-            clientEmail: sa.clientEmail,
-            privateKey: sa.privateKey,
-          }),
-          projectId: sa.projectId,
-        });
-  } catch (err) {
-    console.error("[firebase-admin] initialisation failed:", err);
-    cachedApp = null;
-  }
-  return cachedApp;
 }
 
-export function isAdminConfigured(): boolean {
-  return adminApp() !== null;
-}
-
-export function adminAuth(): Auth | null {
-  const app = adminApp();
-  return app ? getAuth(app) : null;
-}
-
-export function adminDb(): Firestore | null {
-  const app = adminApp();
-  return app ? getFirestore(app) : null;
-}
-
-/** Fourteen days, matching the maximum Firebase allows for session cookies. */
+/** Fourteen days, the maximum Firebase allows for a session cookie. */
 export const SESSION_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 export const SESSION_COOKIE = "meridian_session";
 
 export async function createSessionCookie(idToken: string): Promise<string | null> {
-  const auth = adminAuth();
+  const auth = await adminAuth();
   if (!auth) return null;
   return auth.createSessionCookie(idToken, { expiresIn: SESSION_MAX_AGE_MS });
 }
@@ -128,7 +151,7 @@ export async function verifySessionCookie(
   { checkRevoked = false } = {},
 ): Promise<DecodedIdToken | null> {
   if (!cookie) return null;
-  const auth = adminAuth();
+  const auth = await adminAuth();
   if (!auth) return null;
   try {
     return await auth.verifySessionCookie(cookie, checkRevoked);
@@ -138,7 +161,7 @@ export async function verifySessionCookie(
 }
 
 export async function revokeAllSessions(uid: string): Promise<void> {
-  const auth = adminAuth();
+  const auth = await adminAuth();
   if (!auth) return;
   try {
     await auth.revokeRefreshTokens(uid);

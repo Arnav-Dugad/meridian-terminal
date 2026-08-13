@@ -1,20 +1,16 @@
 import "server-only";
 
 import { cached, peek } from "@/lib/twelvedata/cache";
-import {
-  bool,
-  hasApiKey,
-  MissingApiKey,
-  num,
-  parseDatetime,
-  parseTimestamp,
-  RateLimitExceeded,
-  str,
-  tdFetch,
-} from "@/lib/twelvedata/client";
 import { simulateFx, simulateQuote, simulateSeries } from "@/lib/twelvedata/simulate";
+import * as registry from "@/lib/providers/registry";
+import { fetchExchangeRate, twelveDataMeta } from "@/lib/providers/twelvedata";
 import type {
-  Candle,
+  AnalystConsensus,
+  EarningsPoint,
+  Fundamentals,
+  NewsItem,
+} from "@/lib/providers/types";
+import type {
   CompanyProfile,
   DataSource,
   FxRate,
@@ -32,30 +28,47 @@ import { findBySlug, SECTORS } from "@/lib/market/universe";
 
 /**
  * The service layer: everything above this asks for domain objects and gets
- * them, always. Provider outages, missing keys and exhausted credit budgets
- * are handled here by degrading to cache and then to simulation, with the
- * resulting `source` propagated so the UI can be honest about what it shows.
+ * them, always.
+ *
+ * Routing across providers is the registry's job. What lives here is the
+ * policy on top of it — caching windows, and the degradation ladder that turns
+ * an outage into a labelled fallback rather than an error page:
+ *
+ *     live provider  →  last good cached value  →  simulation
+ *
+ * The resulting `source` is propagated to the UI so nothing is ever presented
+ * as real when it is not.
  */
 
 export interface Resolved<T> {
   data: T;
   source: DataSource;
   notice?: string;
+  /** Provider ids that contributed, for attribution. */
+  providers?: string[];
 }
 
 /* ── Quotes ───────────────────────────────────────────────────────────────── */
 
+/**
+ * Cache windows are per-exchange because a closed market's prices do not
+ * change: refreshing NSE every twelve seconds overnight spends a scarce budget
+ * to re-fetch a constant. Crypto never closes, so it is always on the short
+ * window.
+ */
 function quoteTtl(exchange: ExchangeCode): number {
-  return sessionState(exchange).isLive ? 12_000 : 120_000;
+  // CoinGecko's keyless tier is the tightest per-minute budget in the stack
+  // relative to how often crypto panels appear, and a batch call refreshes
+  // every coin at once — so a slightly longer window costs nothing in
+  // freshness and keeps the budget from being drained by page loads alone.
+  if (exchange === "CRYPTO") return 30_000;
+  return sessionState(exchange).isLive ? 12_000 : 180_000;
 }
 
-/**
- * Batch quotes for a mixed set of instruments.
- *
- * Requests are grouped by exchange because Twelve Data's `exchange` parameter
- * applies to the whole call, and an unqualified `LT` is ambiguous between the
- * NSE listing and an unrelated US one.
- */
+function quoteKey(inst: Instrument) {
+  return `quote:${inst.slug}`;
+}
+
 export async function getQuotes(slugs: string[]): Promise<Resolved<Quote[]>> {
   const instruments = slugs
     .map((s) => findBySlug(s))
@@ -63,182 +76,106 @@ export async function getQuotes(slugs: string[]): Promise<Resolved<Quote[]>> {
 
   if (instruments.length === 0) return { data: [], source: "simulated" };
 
-  if (!hasApiKey()) {
-    return {
-      data: instruments.map((i) => simulateQuote(i)),
-      source: "simulated",
-      notice: "Simulated market — no TWELVE_DATA_API_KEY configured.",
-    };
-  }
-
-  const byExchange = new Map<ExchangeCode, Instrument[]>();
+  // Serve anything still fresh from cache and only ask upstream for the rest.
+  // This is the single biggest saving in the system: a dashboard polling every
+  // few seconds mostly hits here and spends nothing.
+  const fresh = new Map<string, Quote>();
+  const stale: Instrument[] = [];
   for (const inst of instruments) {
-    const list = byExchange.get(inst.exchange);
-    if (list) list.push(inst);
-    else byExchange.set(inst.exchange, [inst]);
+    const hit = peek<Quote>(quoteKey(inst));
+    if (hit && !hit.stale) fresh.set(inst.slug, hit.value);
+    else stale.push(inst);
   }
 
-  const results = new Map<string, Quote>();
-  let degraded = false;
-  let notice: string | undefined;
+  if (stale.length > 0 && registry.configuredProviderCount() > 0) {
+    try {
+      const result = await registry.fetchQuotes(stale);
 
-  await Promise.all(
-    Array.from(byExchange.entries()).map(async ([exchange, group]) => {
-      try {
-        const fetched = await fetchQuoteGroup(exchange, group);
-        for (const q of fetched) results.set(q.slug, q);
-      } catch (err) {
-        degraded = true;
-        notice ??= describeFailure(err);
+      for (const quote of result.quotes) {
+        fresh.set(quote.slug, quote);
+        const inst = findBySlug(quote.slug);
+        if (inst) {
+          const ttl = quoteTtl(inst.exchange);
+          void cached(quoteKey(inst), { ttl, maxAge: ttl * 20 }, async () => quote);
+        }
       }
-    }),
-  );
+    } catch {
+      // The registry already failed over internally; reaching here means every
+      // provider is down. Fall through to cache, then simulation.
+    }
+  }
 
-  // Fill gaps: last good cached value if we have one, else simulation.
+  // Fill any remaining gaps, worst case last.
+  let degraded = false;
   const data: Quote[] = instruments.map((inst) => {
-    const live = results.get(inst.slug);
+    const live = fresh.get(inst.slug);
     if (live) return live;
 
-    const stale = peek<Quote>(quoteKey(inst));
-    if (stale) {
+    const lastGood = peek<Quote>(quoteKey(inst));
+    if (lastGood) {
       degraded = true;
-      return { ...stale.value, source: "cached" as const };
+      return { ...lastGood.value, source: "cached" as const };
     }
+
     degraded = true;
     return simulateQuote(inst);
   });
 
-  const source: DataSource = degraded
-    ? data.every((q) => q.source === "simulated")
-      ? "simulated"
-      : "cached"
-    : "live";
+  const simulatedCount = data.filter((q) => q.source === "simulated").length;
+  const source: DataSource =
+    simulatedCount === data.length ? "simulated" : degraded ? "cached" : "live";
 
-  return { data, source, notice: degraded ? (notice ?? "Some symbols degraded to cached or simulated values.") : undefined };
-}
+  // Attribution is derived from the returned quotes rather than from what this
+  // call happened to fetch. A quote served from a fresh cache entry is still
+  // that provider's number, and dropping the credit because we did not re-ask
+  // for it produced an empty provider list on any warm request.
+  const providers = Array.from(
+    new Set(data.map((q) => q.provider).filter((p): p is string => Boolean(p))),
+  );
 
-function quoteKey(inst: Instrument) {
-  return `quote:${inst.slug}`;
-}
+  const liveCount = data.filter((q) => q.source === "live").length;
 
-async function fetchQuoteGroup(exchange: ExchangeCode, group: Instrument[]): Promise<Quote[]> {
-  const ttl = quoteTtl(exchange);
-
-  // Serve anything already fresh from cache and only ask upstream for the rest.
-  const missing: Instrument[] = [];
-  const hits: Quote[] = [];
-  for (const inst of group) {
-    const hit = peek<Quote>(quoteKey(inst));
-    if (hit && !hit.stale) hits.push(hit.value);
-    else missing.push(inst);
-  }
-  if (missing.length === 0) return hits;
-
-  const symbols = missing.map((i) => i.symbol);
-  const key = `quotes:${exchange}:${symbols.slice().sort().join(",")}`;
-  const isIndexOnly = missing.every((i) => i.kind === "index");
-
-  const { value } = await cached(key, { ttl, maxAge: ttl * 20 }, async () => {
-    return tdFetch<unknown>(
-      "quote",
-      {
-        symbol: symbols.join(","),
-        // Indices are not scoped by exchange in Twelve Data's namespace.
-        exchange: isIndexOnly ? undefined : exchange,
-      },
-      { cost: symbols.length, maxWaitMs: 2500 },
-    );
-  });
-
-  const rows = unwrapBatch(value, symbols);
-  const out: Quote[] = [...hits];
-
-  for (const inst of missing) {
-    const raw = rows.get(inst.symbol);
-    const parsed = raw ? normaliseQuote(raw, inst) : null;
-    if (parsed) {
-      // Seed the per-symbol cache so partial batches can be reused later.
-      void cached(quoteKey(inst), { ttl, maxAge: ttl * 20 }, async () => parsed);
-      out.push(parsed);
-    }
-  }
-  return out;
+  return {
+    data,
+    source,
+    providers,
+    notice: degraded ? degradationNotice(data, simulatedCount, liveCount) : undefined,
+  };
 }
 
 /**
- * Twelve Data returns a bare object for one symbol and a symbol-keyed map for
- * many. Per-symbol failures arrive as `{ status: "error" }` values inside an
- * otherwise successful map, and must not poison the healthy rows.
+ * Explains *which* instruments degraded and why, rather than a generic banner.
+ * The common real-world case — a Twelve Data plan that does not include the
+ * Indian exchanges — is worth naming explicitly, because it looks like a bug
+ * and is actually a subscription boundary.
  */
-function unwrapBatch(payload: unknown, symbols: string[]): Map<string, Record<string, unknown>> {
-  const out = new Map<string, Record<string, unknown>>();
-  if (typeof payload !== "object" || payload === null) return out;
+function degradationNotice(data: Quote[], simulatedCount: number, liveCount: number): string {
+  const simulatedIndia = data.filter((q) => q.source === "simulated" && q.region === "IN");
+  const simulatedOther = data.filter((q) => q.source === "simulated" && q.region !== "IN");
 
-  const obj = payload as Record<string, unknown>;
-
-  if (symbols.length === 1 && ("close" in obj || "symbol" in obj || "values" in obj)) {
-    const only = symbols[0];
-    if (only) out.set(only, obj);
-    return out;
+  if (simulatedCount === 0) {
+    return "Some values were served from cache rather than re-fetched.";
   }
 
-  for (const sym of symbols) {
-    const row = obj[sym];
-    if (typeof row === "object" && row !== null) {
-      const rec = row as Record<string, unknown>;
-      if (rec["status"] === "error") continue;
-      out.set(sym, rec);
-    }
-  }
-  return out;
-}
-
-function normaliseQuote(raw: Record<string, unknown>, inst: Instrument): Quote | null {
-  const price = num(raw["close"]) ?? num(raw["price"]);
-  if (price == null) return null;
-
-  const previousClose = num(raw["previous_close"]) ?? price;
-  const change = num(raw["change"]) ?? price - previousClose;
-  const changePercent =
-    num(raw["percent_change"]) ?? (previousClose > 0 ? (change / previousClose) * 100 : 0);
-
-  const fiftyTwo = raw["fifty_two_week"];
-  let high52: number | null = null;
-  let low52: number | null = null;
-  if (typeof fiftyTwo === "object" && fiftyTwo !== null) {
-    const f = fiftyTwo as Record<string, unknown>;
-    high52 = num(f["high"]);
-    low52 = num(f["low"]);
+  // The India-only case is worth naming specifically: it looks like a bug and
+  // is actually a plan boundary, and the fix is different from every other
+  // degradation here.
+  if (simulatedIndia.length > 0 && simulatedOther.length === 0) {
+    return twelveDataMeta.configured
+      ? "Indian listings are simulated. Twelve Data's free tier covers US markets only — NSE and BSE need a paid plan."
+      : "Indian listings are simulated — no TWELVE_DATA_API_KEY configured.";
   }
 
-  const timestamp =
-    parseTimestamp(raw["timestamp"]) ?? parseDatetime(raw["datetime"]) ?? Date.now();
+  if (simulatedCount === data.length) {
+    return registry.configuredProviderCount() === 0
+      ? "Simulated market — no data provider is configured. See the Markets page for which keys unlock what."
+      : "Every provider was rate-limited or unreachable; showing simulated values.";
+  }
 
-  return {
-    symbol: inst.symbol,
-    slug: inst.slug,
-    name: str(raw["name"]) ?? inst.name,
-    exchange: inst.exchange,
-    region: inst.region,
-    currency: inst.currency,
-    sector: inst.sector,
-    price,
-    previousClose,
-    open: num(raw["open"]) ?? price,
-    dayHigh: num(raw["high"]) ?? price,
-    dayLow: num(raw["low"]) ?? price,
-    change,
-    changePercent,
-    volume: num(raw["volume"]) ?? 0,
-    fiftyTwoWeekHigh: high52,
-    fiftyTwoWeekLow: low52,
-    fiftyTwoWeekPosition:
-      high52 != null && low52 != null && high52 > low52 ? (price - low52) / (high52 - low52) : null,
-    marketCap: num(raw["market_cap"]),
-    timestamp,
-    isOpen: bool(raw["is_market_open"]),
-    source: "live",
-  };
+  const detail = simulatedIndia.length > 0 && simulatedOther.length > 0 ? " (including Indian listings)" : "";
+  return liveCount > 0
+    ? `${simulatedCount} of ${data.length} instruments are simulated${detail} — the rest are live or cached.`
+    : `${simulatedCount} of ${data.length} instruments are simulated${detail}.`;
 }
 
 /* ── Time series ──────────────────────────────────────────────────────────── */
@@ -247,178 +184,228 @@ export async function getSeries(slug: string, range: RangeKey): Promise<Resolved
   const inst = findBySlug(slug);
   if (!inst) throw new Error(`Unknown instrument: ${slug}`);
 
-  if (!hasApiKey()) {
-    return {
-      data: simulateSeries(inst, range),
-      source: "simulated",
-      notice: "Simulated history — no TWELVE_DATA_API_KEY configured.",
-    };
-  }
-
   const spec = RANGE_SPEC[range];
   const intraday = spec.interval.includes("min") || spec.interval === "1h";
   const ttl = intraday ? 60_000 : 900_000;
   const key = `series:${inst.slug}:${range}`;
 
-  try {
-    const { value, stale } = await cached(key, { ttl, maxAge: ttl * 24 }, async () =>
-      tdFetch<unknown>(
-        "time_series",
-        {
-          symbol: inst.symbol,
-          exchange: inst.kind === "index" ? undefined : inst.exchange,
-          interval: spec.interval,
-          outputsize: spec.outputsize,
-          order: "ASC",
-        },
-        { cost: 1, maxWaitMs: 3000 },
-      ),
-    );
+  const wrap = (candles: Series["candles"], source: DataSource): Series => ({
+    symbol: inst.symbol,
+    slug: inst.slug,
+    interval: spec.interval,
+    range,
+    currency: inst.currency,
+    candles,
+    source,
+  });
 
-    const candles = normaliseCandles(value);
-    if (candles.length === 0) throw new Error("Empty series");
+  if (registry.configuredProviderCount() === 0 && inst.kind !== "crypto") {
+    return {
+      data: simulateSeries(inst, range),
+      source: "simulated",
+      notice: "Simulated history — no data provider is configured.",
+    };
+  }
+
+  try {
+    const { value, stale } = await cached(key, { ttl, maxAge: ttl * 24 }, async () => {
+      const result = await registry.fetchSeries(inst, range);
+      if (!result || result.candles.length === 0) throw new Error("no history returned");
+      return result;
+    });
 
     return {
-      data: {
-        symbol: inst.symbol,
-        slug: inst.slug,
-        interval: spec.interval,
-        range,
-        currency: inst.currency,
-        candles,
-        source: stale ? "cached" : "live",
-      },
+      data: wrap(value.candles, stale ? "cached" : "live"),
       source: stale ? "cached" : "live",
+      providers: [value.provider],
     };
-  } catch (err) {
-    const stale = peek<unknown>(key);
-    if (stale) {
-      const candles = normaliseCandles(stale.value);
-      if (candles.length > 0) {
-        return {
-          data: {
-            symbol: inst.symbol,
-            slug: inst.slug,
-            interval: spec.interval,
-            range,
-            currency: inst.currency,
-            candles,
-            source: "cached",
-          },
-          source: "cached",
-          notice: "Showing the last successfully retrieved history.",
-        };
-      }
+  } catch {
+    const lastGood = peek<{ candles: Series["candles"] }>(key);
+    if (lastGood && lastGood.value.candles.length > 0) {
+      return {
+        data: wrap(lastGood.value.candles, "cached"),
+        source: "cached",
+        notice: "Showing the last successfully retrieved history.",
+      };
     }
     return {
       data: simulateSeries(inst, range),
       source: "simulated",
-      notice: describeFailure(err),
+      notice: "History unavailable from every provider; showing a simulated series.",
     };
   }
 }
 
-function normaliseCandles(payload: unknown): Candle[] {
-  if (typeof payload !== "object" || payload === null) return [];
-  const values = (payload as Record<string, unknown>)["values"];
-  if (!Array.isArray(values)) return [];
+/* ── Breadth endpoints ────────────────────────────────────────────────────── */
 
-  const out: Candle[] = [];
-  for (const v of values) {
-    if (typeof v !== "object" || v === null) continue;
-    const row = v as Record<string, unknown>;
-    const t = parseDatetime(row["datetime"]);
-    const c = num(row["close"]);
-    if (t == null || c == null) continue;
-    const o = num(row["open"]) ?? c;
-    const h = num(row["high"]) ?? Math.max(o, c);
-    const l = num(row["low"]) ?? Math.min(o, c);
-    out.push({ t, o, h, l, c, v: num(row["volume"]) ?? 0 });
+export async function getNews(slug: string | null, limit = 20): Promise<Resolved<NewsItem[]>> {
+  const inst = (slug ? findBySlug(slug) : null) ?? null;
+  if (slug && !inst) return { data: [], source: "simulated" };
+
+  const key = `news:${inst?.slug ?? "market"}`;
+  try {
+    // News is expensive relative to its rate of change; ten minutes is plenty.
+    const { value, stale } = await cached(key, { ttl: 600_000, maxAge: 3_600_000 }, async () => {
+      const result = await registry.fetchNews(inst, limit);
+      if (!result || result.items.length === 0) throw new Error("no news returned");
+      return result;
+    });
+    return {
+      data: value.items.slice(0, limit),
+      source: stale ? "cached" : "live",
+      providers: [value.provider],
+    };
+  } catch {
+    return {
+      data: [],
+      source: "simulated",
+      notice: inst && inst.region !== "US"
+        ? "Company news is only available for US listings on the free tiers in use."
+        : "No news provider is configured. Add FINNHUB_API_KEY to enable this panel.",
+    };
   }
+}
 
-  // `order=ASC` is requested, but never trust an upstream ordering guarantee
-  // when every downstream renderer assumes it.
-  out.sort((a, b) => a.t - b.t);
-  return out;
+export async function getFundamentals(slug: string): Promise<Resolved<Fundamentals | null>> {
+  const inst = findBySlug(slug);
+  if (!inst || inst.kind !== "equity") return { data: null, source: "simulated" };
+
+  try {
+    // Fundamentals change quarterly. A day is conservative.
+    const { value, stale } = await cached(
+      `fundamentals:${inst.slug}`,
+      { ttl: 86_400_000, maxAge: 172_800_000 },
+      async () => {
+        const result = await registry.fetchFundamentals(inst);
+        if (!result) throw new Error("no fundamentals");
+        return result;
+      },
+    );
+    return { data: value, source: stale ? "cached" : "live", providers: [value.provider] };
+  } catch {
+    return { data: null, source: "simulated" };
+  }
+}
+
+export async function getRecommendations(slug: string): Promise<Resolved<AnalystConsensus | null>> {
+  const inst = findBySlug(slug);
+  if (!inst || inst.kind !== "equity") return { data: null, source: "simulated" };
+
+  try {
+    const { value, stale } = await cached(
+      `recs:${inst.slug}`,
+      { ttl: 43_200_000, maxAge: 172_800_000 },
+      async () => {
+        const result = await registry.fetchRecommendations(inst);
+        if (!result) throw new Error("no recommendations");
+        return result;
+      },
+    );
+    return { data: value, source: stale ? "cached" : "live", providers: [value.provider] };
+  } catch {
+    return { data: null, source: "simulated" };
+  }
+}
+
+export async function getEarnings(slug: string): Promise<Resolved<EarningsPoint[]>> {
+  const inst = findBySlug(slug);
+  if (!inst || inst.kind !== "equity") return { data: [], source: "simulated" };
+
+  try {
+    const { value, stale } = await cached(
+      `earnings:${inst.slug}`,
+      { ttl: 43_200_000, maxAge: 172_800_000 },
+      async () => {
+        const result = await registry.fetchEarnings(inst);
+        if (result.length === 0) throw new Error("no earnings");
+        return result;
+      },
+    );
+    return { data: value, source: stale ? "cached" : "live" };
+  } catch {
+    return { data: [], source: "simulated" };
+  }
+}
+
+export async function getPeers(slug: string): Promise<Resolved<string[]>> {
+  const inst = findBySlug(slug);
+  if (!inst || inst.kind !== "equity") return { data: [], source: "simulated" };
+
+  try {
+    const { value } = await cached(`peers:${inst.slug}`, { ttl: 604_800_000 }, async () => {
+      const result = await registry.fetchPeers(inst);
+      if (result.length === 0) throw new Error("no peers");
+      return result;
+    });
+    return { data: value, source: "live" };
+  } catch {
+    return { data: [], source: "simulated" };
+  }
 }
 
 /* ── Profile ──────────────────────────────────────────────────────────────── */
 
 export async function getProfile(slug: string): Promise<Resolved<CompanyProfile | null>> {
   const inst = findBySlug(slug);
-  if (!inst || inst.kind === "index") return { data: null, source: "simulated" };
-  if (!hasApiKey()) return { data: null, source: "simulated" };
+  if (!inst || inst.kind !== "equity") return { data: null, source: "simulated" };
 
-  try {
-    const { value } = await cached(`profile:${inst.slug}`, { ttl: 86_400_000 }, async () =>
-      tdFetch<Record<string, unknown>>(
-        "profile",
-        { symbol: inst.symbol, exchange: inst.exchange },
-        { cost: 1, maxWaitMs: 1500 },
-      ),
-    );
+  const { data: fundamentals } = await getFundamentals(slug);
+  if (!fundamentals) return { data: null, source: "simulated" };
 
-    return {
-      data: {
-        symbol: inst.symbol,
-        name: str(value["name"]) ?? inst.name,
-        exchange: inst.exchange,
-        currency: inst.currency,
-        sector: str(value["sector"]),
-        industry: str(value["industry"]),
-        description: str(value["description"]),
-        website: str(value["website"]),
-        employees: num(value["employees"]),
-        ceo: str(value["CEO"]) ?? str(value["ceo"]),
-        country: str(value["country"]),
-        source: "live",
-      },
+  return {
+    data: {
+      symbol: inst.symbol,
+      name: inst.name,
+      exchange: inst.exchange,
+      currency: inst.currency,
+      sector: inst.sector,
+      industry: null,
+      description: null,
+      website: null,
+      employees: null,
+      ceo: null,
+      country: EXCHANGES[inst.exchange].country,
       source: "live",
-    };
-  } catch {
-    // A missing profile is cosmetic; never fail the page over it.
-    return { data: null, source: "simulated" };
-  }
+    },
+    source: "live",
+  };
 }
 
 /* ── FX ───────────────────────────────────────────────────────────────────── */
 
 export async function getFx(pair = "USD/INR"): Promise<Resolved<FxRate>> {
-  if (!hasApiKey()) {
-    return {
-      data: { pair, rate: simulateFx(pair), timestamp: Date.now(), source: "simulated" },
-      source: "simulated",
-    };
-  }
+  const fallback = (): Resolved<FxRate> => ({
+    data: { pair, rate: simulateFx(pair), timestamp: Date.now(), source: "simulated" },
+    source: "simulated",
+  });
+
+  if (!twelveDataMeta.configured) return fallback();
+
   try {
-    const { value, stale } = await cached(`fx:${pair}`, { ttl: 300_000, maxAge: 3_600_000 }, async () =>
-      tdFetch<Record<string, unknown>>("exchange_rate", { symbol: pair }, { cost: 1, maxWaitMs: 1500 }),
-    );
-    const rate = num(value["rate"]);
-    if (rate == null) throw new Error("No rate");
-    return {
-      data: {
-        pair,
-        rate,
-        timestamp: parseTimestamp(value["timestamp"]) ?? Date.now(),
-        source: stale ? "cached" : "live",
+    const { value, stale } = await cached(
+      `fx:${pair}`,
+      { ttl: 300_000, maxAge: 3_600_000 },
+      async () => {
+        const rate = await fetchExchangeRate(pair);
+        if (rate == null) throw new Error("no rate");
+        return rate;
       },
+    );
+    return {
+      data: { pair, rate: value, timestamp: Date.now(), source: stale ? "cached" : "live" },
       source: stale ? "cached" : "live",
     };
   } catch {
-    return {
-      data: { pair, rate: simulateFx(pair), timestamp: Date.now(), source: "simulated" },
-      source: "simulated",
-    };
+    return fallback();
   }
 }
 
 /* ── Derived analytics ────────────────────────────────────────────────────── */
 
 /**
- * Breadth is computed locally from the quotes we already hold rather than
- * bought from a dedicated endpoint. It costs nothing extra and stays
- * consistent with whatever the user is actually looking at.
+ * Breadth is computed locally from quotes we already hold rather than bought
+ * from a dedicated endpoint. It costs nothing extra and stays consistent with
+ * whatever the reader is actually looking at.
  */
 export function computeBreadth(quotes: Quote[], region: Region): MarketBreadth {
   const rows = quotes.filter((q) => q.region === region && q.sector !== "Index");
@@ -447,7 +434,7 @@ export function computeBreadth(quotes: Quote[], region: Region): MarketBreadth {
     unchanged,
     weightedChange: capSum > 0 ? capWeighted / capSum : simpleSum / total,
     meanChange: simpleSum / total,
-    ratio: (advancing + declining) > 0 ? advancing / (advancing + declining) : 0.5,
+    ratio: advancing + declining > 0 ? advancing / (advancing + declining) : 0.5,
   };
 }
 
@@ -488,21 +475,8 @@ export function computeSectors(quotes: Quote[], region: Region): SectorAggregate
   return out.sort((a, b) => b.changePercent - a.changePercent);
 }
 
-/* ── Failure messaging ────────────────────────────────────────────────────── */
-
-function describeFailure(err: unknown): string {
-  if (err instanceof MissingApiKey) return "Simulated market — no TWELVE_DATA_API_KEY configured.";
-  if (err instanceof RateLimitExceeded) {
-    return `Twelve Data credit budget reached — showing cached values. Retry in ${Math.ceil(
-      err.retryAfterMs / 1000,
-    )}s.`;
-  }
-  if (err instanceof Error) return `Live feed unavailable — ${err.message}`;
-  return "Live feed unavailable.";
-}
-
 export function marketStatusSnapshot() {
-  return (["NSE", "BSE", "NASDAQ", "NYSE"] as ExchangeCode[]).map((code) => ({
+  return (["NSE", "BSE", "NASDAQ", "NYSE", "CRYPTO"] as ExchangeCode[]).map((code) => ({
     code,
     name: EXCHANGES[code].name,
     region: EXCHANGES[code].region,
