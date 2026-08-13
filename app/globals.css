@@ -137,11 +137,6 @@
   html {
     background-color: var(--color-ink-1000);
     scroll-behavior: smooth;
-    /* Belt and braces against horizontal bleed. Any element that overflows
-       must scroll inside its own container; nothing is allowed to widen the
-       document and produce the sideways rubber-banding that makes a web app
-       feel unmistakably not-native on a phone. */
-    overflow-x: hidden;
     /* Stops iOS Safari inflating font sizes on rotation. */
     -webkit-text-size-adjust: 100%;
   }
@@ -153,12 +148,26 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
-    overscroll-behavior-y: none;
-    overflow-x: hidden;
     /* `100%` rather than `100vw`: on any platform with a visible scrollbar,
        100vw includes it and guarantees a horizontal scrollbar of its own. */
     max-width: 100%;
     min-height: 100dvh;
+
+    /*
+     * Horizontal bleed is contained with `clip`, never `hidden`.
+     *
+     * This distinction broke scrolling entirely, and is worth spelling out.
+     * `overflow-x: hidden` forces the computed `overflow-y` to `auto`, which
+     * turns the element into a scroll container. Body then grows to fit its
+     * content, so it has nothing to scroll — and paired with
+     * `overscroll-behavior-y: none` (which was also set here) the wheel event
+     * could not chain up to the document either. Net effect: a page that
+     * simply would not scroll with a mouse.
+     *
+     * `clip` contains overflow without establishing a scroll container, so the
+     * document keeps ownership of scrolling and the bleed is still suppressed.
+     */
+    overflow-x: clip;
   }
 
   /* Media and embeds never exceed their column. */

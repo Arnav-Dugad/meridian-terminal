@@ -36,12 +36,25 @@ export const alphaVantageMeta: ProviderMeta = {
   label: "Alpha Vantage",
   homepage: "https://www.alphavantage.co",
   capabilities: ["quote", "series"],
-  coverage: ["US"],
+  // Alpha Vantage reaches BSE via a `.BSE` suffix, which makes it a genuine
+  // (if tiny) second source for Indian data rather than a US-only fallback.
+  coverage: ["US", "IN"],
   get configured() {
     return key() !== null;
   },
   envVar: "ALPHA_VANTAGE_API_KEY",
 };
+
+/**
+ * Alpha Vantage namespaces Indian listings on BSE with a `.BSE` suffix and has
+ * no NSE equivalent, so an NSE instrument is looked up against its BSE line.
+ * Prices differ by a few basis points between the venues; at 25 calls a day
+ * this is a backstop, and being approximately right beats being absent.
+ */
+function alphaSymbolFor(inst: Instrument): string {
+  if (inst.region === "IN") return `${inst.symbol}.BSE`;
+  return inst.symbol;
+}
 
 function url(params: Record<string, string>): string {
   const k = key();
@@ -71,7 +84,7 @@ export const alphaVantage: QuoteProvider = {
     for (const inst of instruments.slice(0, 4)) {
       try {
         const payload = await providerFetch<Record<string, unknown>>(
-          url({ function: "GLOBAL_QUOTE", symbol: inst.symbol }),
+          url({ function: "GLOBAL_QUOTE", symbol: alphaSymbolFor(inst) }),
           { provider: ID, maxWaitMs: 600 },
         );
         assertNotThrottled(payload);

@@ -9,6 +9,7 @@ import { RangeBar } from "@/components/market/RangeBar";
 import { DataSourceNotice } from "@/components/market/DataSourceNotice";
 import { AlertComposer } from "@/components/market/AlertComposer";
 import { NewsPanel } from "@/components/market/NewsFeed";
+import { InstrumentNotes } from "@/components/market/InstrumentNotes";
 import {
   AnalystPanel,
   EarningsPanel,
@@ -88,6 +89,12 @@ export function StockView({
   const quote = liveQuote ?? initialQuote;
 
   const research = useResearch(slug, instrument?.kind === "equity");
+
+  // Feeds the command palette's recent list and the dashboard's history.
+  const { recordView } = usePersonal();
+  useEffect(() => {
+    recordView(slug);
+  }, [slug, recordView]);
 
   const { series, loading } = useSeries(slug, range, initialSeries);
   const candles = series?.candles ?? initialSeries.candles;
@@ -496,6 +503,10 @@ export function StockView({
             </div>
           </div>
         )}
+
+        {/* Notes sit last: they are the thing you come back to, not the thing
+            you arrive for. Available for every instrument, not just equities. */}
+        <InstrumentNotes slug={slug} symbol={quote.symbol} />
 
         {/* ── Profile ──────────────────────────────────────────────────── */}
         {profile && (profile.description || profile.industry) && (

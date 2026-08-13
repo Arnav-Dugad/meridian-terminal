@@ -5,6 +5,7 @@ import { coingecko } from "@/lib/providers/coingecko";
 import { finnhub } from "@/lib/providers/finnhub";
 import { fmp } from "@/lib/providers/fmp";
 import { twelveData } from "@/lib/providers/twelvedata";
+import { yahoo } from "@/lib/providers/yahoo";
 import { canSpend, limiterSnapshot } from "@/lib/providers/limiter";
 import type {
   AnalystConsensus,
@@ -20,25 +21,29 @@ import type { Candle, Quote, RangeKey } from "@/lib/twelvedata/types";
 /**
  * Provider routing.
  *
- * The rule that governs every chain below: **spend the scarcest budget last.**
+ * Two rules govern every chain below.
  *
- *   Finnhub       60/min   → US quotes, news, consensus, earnings, peers
- *   CoinGecko     ~25/min  → crypto quotes and history (and it batches)
- *   Twelve Data    8/min   → India (nothing else covers NSE) and all history
+ * **1. Route to who actually has coverage.**
+ * Twelve Data's free tier returns a hard 404 for NSE and BSE symbols — they
+ * need the Grow plan — so on a free stack there was no route to an Indian
+ * quote at all, and India fell through to simulation regardless of budget.
+ * Yahoo serves NSE, BSE, both countries' indices and crypto with no key, which
+ * is why it leads the Indian chain and backs up every other one.
+ *
+ * **2. Spend the scarcest budget last.**
+ *
+ *   Yahoo         ~60/min  → India, indices, and a universal fallback
+ *   Finnhub        60/min  → US quotes, news, consensus, earnings, peers
+ *   CoinGecko     ~12/min  → crypto (batches the whole set in one call)
+ *   Twelve Data     8/min  → US-only on the free tier; kept for paid plans
  *   FMP          250/day   → fundamentals only, cached for a day
- *   Alpha Vantage 25/day   → spare tyre, last in every chain
- *
- * Concretely: a US quote goes to Finnhub because Twelve Data's eight credits
- * are the only way to price an NSE listing, and burning them on AAPL means
- * RELIANCE falls back to simulated. That is precisely the bug this routing
- * fixes — the previous single-provider design spent its entire minute on the
- * dashboard's US sample and had nothing left for India.
+ *   Alpha Vantage  25/day  → spare tyre; notably *does* reach BSE
  *
  * Chains skip providers that are unconfigured or already out of budget, so a
  * failover costs no wall time when the answer is knowable up front.
  */
 
-const ALL_PROVIDERS: QuoteProvider[] = [finnhub, coingecko, twelveData, fmp, alphaVantage];
+const ALL_PROVIDERS: QuoteProvider[] = [yahoo, finnhub, coingecko, twelveData, fmp, alphaVantage];
 
 function isConfigured(p: QuoteProvider): boolean {
   return p.meta.configured;
@@ -49,22 +54,30 @@ function chainFor(capability: Capability, inst: Instrument): QuoteProvider[] {
   const chain: QuoteProvider[] = [];
 
   if (inst.kind === "crypto") {
-    if (capability === "quote" || capability === "series") chain.push(coingecko);
+    // CoinGecko first because it batches — one call prices every coin on the
+    // page, where Yahoo needs one per symbol.
+    if (capability === "quote" || capability === "series") chain.push(coingecko, yahoo);
     return chain.filter(isConfigured);
   }
 
   switch (capability) {
     case "quote":
-      // US: Finnhub first — seven times the budget, and it carries the day's
-      // high/low. India: only Twelve Data reaches NSE at all.
-      if (inst.region === "US") chain.push(finnhub, twelveData, alphaVantage);
-      else chain.push(twelveData);
+      if (inst.region === "IN") {
+        // Yahoo is the only free route to NSE and BSE. Alpha Vantage is a real
+        // fallback here — it reaches BSE — but at 25 calls a day it is a
+        // last resort, not a tier.
+        chain.push(yahoo, twelveData, alphaVantage);
+      } else {
+        // US: Finnhub leads on budget and carries the day's range; Yahoo backs
+        // it up and also supplies the 52-week band Finnhub's quote omits.
+        chain.push(finnhub, yahoo, twelveData, alphaVantage);
+      }
       break;
 
     case "series":
-      // Finnhub's free candle endpoint is restricted, so history is Twelve
-      // Data's job in both regions.
-      chain.push(twelveData, alphaVantage);
+      // Finnhub's free candle endpoint is restricted and Twelve Data cannot
+      // reach India, so Yahoo carries history for both regions.
+      chain.push(yahoo, twelveData, alphaVantage);
       break;
 
     case "fundamentals":
@@ -174,11 +187,22 @@ export async function fetchQuotes(instruments: Instrument[]): Promise<QuoteResul
 
 const ENRICH_LIMIT = 6;
 
+/**
+ * Neither Yahoo's chart meta nor Finnhub's quote carries a market cap, so it is
+ * backfilled from Finnhub's profile endpoint for the handful of names actually
+ * on screen. Capped and best-effort: one extra call per symbol is affordable
+ * for six rows and indefensible for forty, and a missing market cap is a dash
+ * in a table rather than a broken quote.
+ *
+ * US only — Finnhub's free profile endpoint does not cover Indian listings.
+ */
 async function enrichFromProfiles(found: Map<string, Quote>): Promise<void> {
+  if (!finnhub.meta.configured) return;
+
   const needing = Array.from(found.values())
-    .filter((q) => q.provider === finnhub.meta.id && q.marketCap == null)
+    .filter((q) => q.marketCap == null && q.region === "US" && q.sector !== "Index")
     .slice(0, ENRICH_LIMIT);
-  if (needing.length === 0 || !finnhub.meta.configured) return;
+  if (needing.length === 0) return;
   if (!canSpend(finnhub.meta.id, needing.length)) return;
 
   await Promise.all(

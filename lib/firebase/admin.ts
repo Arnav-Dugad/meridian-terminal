@@ -2,6 +2,7 @@ import "server-only";
 
 import type { App } from "firebase-admin/app";
 import type { Auth, DecodedIdToken } from "firebase-admin/auth";
+import type { Firestore } from "firebase-admin/firestore";
 
 /**
  * Server-side Firebase.
@@ -127,6 +128,36 @@ export async function adminAuth(): Promise<Auth | null> {
     return getAuth(app);
   } catch (err) {
     console.error("[firebase-admin] getAuth failed:", err);
+    return null;
+  }
+}
+
+let firestoreRef: Firestore | null = null;
+
+/**
+ * Server-side Firestore, used for the shared quote cache and for reading a
+ * user's book during server rendering. Like everything else here it returns
+ * null rather than throwing when unavailable, so callers degrade instead of
+ * failing.
+ */
+export async function adminDb(): Promise<Firestore | null> {
+  if (firestoreRef) return firestoreRef;
+  const app = await adminApp();
+  if (!app) return null;
+  try {
+    const { getFirestore } = await import("firebase-admin/firestore");
+    firestoreRef = getFirestore(app);
+    // `ignoreUndefinedProperties` is belt-and-braces alongside the explicit
+    // sanitising in the cache layer: a single undefined field would otherwise
+    // reject an entire batch.
+    try {
+      firestoreRef.settings({ ignoreUndefinedProperties: true });
+    } catch {
+      // settings() throws if the instance has already been used; harmless.
+    }
+    return firestoreRef;
+  } catch (err) {
+    console.error("[firebase-admin] getFirestore failed:", err);
     return null;
   }
 }

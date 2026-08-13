@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/primitives";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { IconBriefcase, IconClose, IconPlus, IconSearch, IconTrash } from "@/components/ui/icons";
+import { PortfolioHistory } from "@/components/market/PortfolioHistory";
 import { usePersonal } from "@/lib/store/personal";
 import { useQuotes } from "@/lib/hooks/market-data";
 import { findBySlug, searchUniverse, SECTOR_HUE } from "@/lib/market/universe";
@@ -28,7 +29,17 @@ import { cn } from "@/lib/utils";
 import type { FxRate } from "@/lib/twelvedata/types";
 
 export function PortfolioView() {
-  const { positions, preferences, setPreference, addPosition, removePosition, mode, ready } = usePersonal();
+  const {
+    positions,
+    preferences,
+    setPreference,
+    addPosition,
+    removePosition,
+    mode,
+    ready,
+    snapshots,
+    recordSnapshot,
+  } = usePersonal();
   const [composerOpen, setComposerOpen] = useState(false);
   const [fx, setFx] = useState<FxRate | null>(null);
 
@@ -69,6 +80,29 @@ export function PortfolioView() {
     () => concentration(summary.positions.map((p) => p.weight)),
     [summary.positions],
   );
+
+  /**
+   * Record today's valuation once the book is actually priced.
+   *
+   * Gated on `pricedCount` because writing a snapshot before quotes land would
+   * store the cost basis as the market value and put a false flat spot in the
+   * curve. `recordSnapshot` is keyed by date and skips sub-cent changes, so
+   * this is safe to call on every render.
+   */
+  useEffect(() => {
+    if (!ready || positions.length === 0) return;
+    if (summary.pricedCount === 0 || summary.value <= 0) return;
+
+    recordSnapshot({
+      date: todayKey(),
+      value: summary.value,
+      cost: summary.cost,
+      pnl: summary.pnl,
+      baseCurrency: base,
+      positionCount: positions.length,
+      fxRate: rate,
+    });
+  }, [ready, positions.length, summary.pricedCount, summary.value, summary.cost, summary.pnl, base, rate, recordSnapshot]);
 
   const money = (v: number) => formatPrice(v, base);
 
@@ -165,7 +199,9 @@ export function PortfolioView() {
           />
         </div>
 
-        <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
+        <PortfolioHistory snapshots={snapshots} baseCurrency={base} />
+
+        <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
           {/* Positions */}
           <Panel flush className="min-w-0">
             <PanelHeader
@@ -412,6 +448,18 @@ export function PortfolioView() {
 }
 
 /* ── Pieces ───────────────────────────────────────────────────────────────── */
+
+/**
+ * Today's date in the viewer's own timezone, as `YYYY-MM-DD`.
+ * `toISOString` would key on UTC and roll the day over at 05:30 IST.
+ */
+function todayKey(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
 
 function HeadlineCell({
   label,

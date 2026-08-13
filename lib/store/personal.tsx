@@ -15,13 +15,16 @@ import { doc, onSnapshot, setDoc, type DocumentData } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 import { useAuth } from "@/lib/firebase/auth-context";
 import { uid as makeId } from "@/lib/utils";
-import { DEFAULT_PREFERENCES, EMPTY_PERSONAL } from "@/lib/store/types";
+import { DEFAULT_PREFERENCES, EMPTY_PERSONAL, LIMITS } from "@/lib/store/types";
 import type {
   AlertKind,
+  InstrumentNote,
   PersonalState,
+  PortfolioSnapshot,
   Position,
   Preferences,
   PriceAlert,
+  SavedScreen,
   StorageMode,
 } from "@/lib/store/types";
 import { DEFAULT_WATCHLIST, findBySlug } from "@/lib/market/universe";
@@ -74,6 +77,17 @@ interface PersonalContextValue extends PersonalState {
 
   setPreference: <K extends keyof Preferences>(key: K, value: Preferences[K]) => void;
   resetAll: () => void;
+
+  recordView: (slug: string) => void;
+
+  noteFor: (slug: string) => InstrumentNote | undefined;
+  saveNote: (slug: string, body: string) => void;
+  removeNote: (slug: string) => void;
+
+  saveScreen: (screen: Omit<SavedScreen, "id" | "createdAt">) => void;
+  removeScreen: (id: string) => void;
+
+  recordSnapshot: (snapshot: Omit<PortfolioSnapshot, "recordedAt">) => void;
 }
 
 const PersonalContext = createContext<PersonalContextValue | null>(null);
@@ -121,7 +135,89 @@ function coerceState(raw: unknown): PersonalState {
     reducedMotion: prefsRaw["reducedMotion"] === true,
   };
 
-  return { watchlist, positions, alerts, preferences };
+  const recentlyViewed = Array.isArray(r["recentlyViewed"])
+    ? (r["recentlyViewed"] as unknown[])
+        .filter((s): s is string => typeof s === "string")
+        .filter((s) => Boolean(findBySlug(s)))
+        .slice(0, LIMITS.recentlyViewed)
+    : [];
+
+  const notes = Array.isArray(r["notes"])
+    ? (r["notes"] as unknown[]).flatMap((n) => {
+        const note = coerceNote(n);
+        return note ? [note] : [];
+      })
+    : [];
+
+  const savedScreens = Array.isArray(r["savedScreens"])
+    ? (r["savedScreens"] as unknown[]).flatMap((s) => {
+        const screen = coerceScreen(s);
+        return screen ? [screen] : [];
+      })
+    : [];
+
+  const snapshots = Array.isArray(r["snapshots"])
+    ? (r["snapshots"] as unknown[])
+        .flatMap((s) => {
+          const snap = coerceSnapshot(s);
+          return snap ? [snap] : [];
+        })
+        .sort((a, b) => a.date.localeCompare(b.date))
+    : [];
+
+  return { watchlist, positions, alerts, preferences, recentlyViewed, notes, savedScreens, snapshots };
+}
+
+function coerceNote(n: unknown): InstrumentNote | null {
+  if (typeof n !== "object" || n === null) return null;
+  const r = n as Record<string, unknown>;
+  const slug = typeof r["slug"] === "string" ? r["slug"] : null;
+  const inst = slug ? findBySlug(slug) : undefined;
+  const body = typeof r["body"] === "string" ? r["body"] : null;
+  if (!inst || !body) return null;
+  return {
+    slug: inst.slug,
+    symbol: inst.symbol,
+    body: body.slice(0, 4000),
+    updatedAt: Number(r["updatedAt"]) || Date.now(),
+  };
+}
+
+function coerceScreen(s: unknown): SavedScreen | null {
+  if (typeof s !== "object" || s === null) return null;
+  const r = s as Record<string, unknown>;
+  const name = typeof r["name"] === "string" ? r["name"].slice(0, 60) : null;
+  if (!name) return null;
+  const strings = (v: unknown) =>
+    Array.isArray(v) ? (v as unknown[]).filter((x): x is string => typeof x === "string") : [];
+  return {
+    id: typeof r["id"] === "string" ? r["id"] : makeId("screen"),
+    name,
+    regions: strings(r["regions"]),
+    sectors: strings(r["sectors"]),
+    changeFilter: typeof r["changeFilter"] === "string" ? r["changeFilter"] : "any",
+    rangeFilter: typeof r["rangeFilter"] === "string" ? r["rangeFilter"] : "any",
+    minChange: Number(r["minChange"]) || 0,
+    createdAt: Number(r["createdAt"]) || Date.now(),
+  };
+}
+
+function coerceSnapshot(s: unknown): PortfolioSnapshot | null {
+  if (typeof s !== "object" || s === null) return null;
+  const r = s as Record<string, unknown>;
+  const date = typeof r["date"] === "string" && /^\d{4}-\d{2}-\d{2}$/.test(r["date"]) ? r["date"] : null;
+  const value = Number(r["value"]);
+  if (!date || !Number.isFinite(value)) return null;
+  return {
+    date,
+    value,
+    cost: Number(r["cost"]) || 0,
+    pnl: Number(r["pnl"]) || 0,
+    baseCurrency: r["baseCurrency"] === "USD" ? "USD" : "INR",
+    positionCount: Number(r["positionCount"]) || 0,
+    fxRate: Number(r["fxRate"]) || 0,
+    recordedAt: Number(r["recordedAt"]) || Date.now(),
+  };
 }
 
 function coercePosition(p: unknown): Position | null {
@@ -255,6 +351,7 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
 
           setState(remote ?? { ...EMPTY_PERSONAL, watchlist: DEFAULT_WATCHLIST });
           if (!remote) void persistCloud(user.uid, { ...EMPTY_PERSONAL, watchlist: DEFAULT_WATCHLIST });
+
           setReady(true);
           return;
         }
@@ -413,6 +510,107 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
     mutate(() => ({ ...EMPTY_PERSONAL, watchlist: DEFAULT_WATCHLIST }));
   }, [mutate]);
 
+  /**
+   * Recently viewed. Deduplicated and capped, so the list is a genuine
+   * most-recent-first history rather than an append-only log.
+   */
+  const recordView = useCallback(
+    (slug: string) => {
+      const inst = findBySlug(slug);
+      if (!inst) return;
+      mutate((p) =>
+        p.recentlyViewed[0] === inst.slug
+          ? p // Already at the head; skip the write entirely.
+          : {
+              ...p,
+              recentlyViewed: [
+                inst.slug,
+                ...p.recentlyViewed.filter((s) => s !== inst.slug),
+              ].slice(0, LIMITS.recentlyViewed),
+            },
+      );
+    },
+    [mutate],
+  );
+
+  const noteFor = useCallback(
+    (slug: string) => state.notes.find((n) => n.slug === slug),
+    [state.notes],
+  );
+
+  const saveNote = useCallback(
+    (slug: string, body: string) => {
+      const inst = findBySlug(slug);
+      if (!inst) return;
+      const trimmed = body.trim().slice(0, 4000);
+
+      mutate((p) => {
+        // An emptied note is a deletion — keeping a blank record would clutter
+        // the notes index and read as a bug.
+        if (!trimmed) return { ...p, notes: p.notes.filter((n) => n.slug !== inst.slug) };
+
+        const note: InstrumentNote = {
+          slug: inst.slug,
+          symbol: inst.symbol,
+          body: trimmed,
+          updatedAt: Date.now(),
+        };
+        const without = p.notes.filter((n) => n.slug !== inst.slug);
+        return { ...p, notes: [note, ...without].slice(0, LIMITS.notes) };
+      });
+    },
+    [mutate],
+  );
+
+  const removeNote = useCallback(
+    (slug: string) => mutate((p) => ({ ...p, notes: p.notes.filter((n) => n.slug !== slug) })),
+    [mutate],
+  );
+
+  const saveScreen = useCallback<PersonalContextValue["saveScreen"]>(
+    (screen) => {
+      const saved: SavedScreen = { ...screen, id: makeId("screen"), createdAt: Date.now() };
+      mutate((p) => ({
+        ...p,
+        savedScreens: [saved, ...p.savedScreens].slice(0, LIMITS.savedScreens),
+      }));
+    },
+    [mutate],
+  );
+
+  const removeScreen = useCallback(
+    (id: string) => mutate((p) => ({ ...p, savedScreens: p.savedScreens.filter((s) => s.id !== id) })),
+    [mutate],
+  );
+
+  /**
+   * Record today's book value.
+   *
+   * Keyed by date so it is idempotent — the app calls this on every portfolio
+   * view, and the day's entry is overwritten rather than duplicated. That
+   * makes the history self-maintaining without a scheduled job.
+   */
+  const recordSnapshot = useCallback<PersonalContextValue["recordSnapshot"]>(
+    (snapshot) => {
+      mutate((p) => {
+        const existing = p.snapshots.find((s) => s.date === snapshot.date);
+        // Skip the write when nothing material moved — otherwise every render
+        // of the portfolio page is a Firestore write.
+        if (existing && Math.abs(existing.value - snapshot.value) < 0.01) return p;
+
+        const next: PortfolioSnapshot = { ...snapshot, recordedAt: Date.now() };
+        const without = p.snapshots.filter((s) => s.date !== snapshot.date);
+        return {
+          ...p,
+          snapshots: [...without, next]
+            .sort((a, b) => a.date.localeCompare(b.date))
+            .slice(-LIMITS.snapshots),
+        };
+      });
+    },
+    [mutate],
+  );
+
   const value = useMemo<PersonalContextValue>(
     () => ({
       ...state,
@@ -433,11 +631,19 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
       markAlertTriggered,
       setPreference,
       resetAll,
+      recordView,
+      noteFor,
+      saveNote,
+      removeNote,
+      saveScreen,
+      removeScreen,
+      recordSnapshot,
     }),
     [
       state, ready, mode, migrated, isWatched, toggleWatch, addToWatchlist, removeFromWatchlist,
       reorderWatchlist, addPosition, updatePosition, removePosition, addAlert, updateAlert,
-      removeAlert, markAlertTriggered, setPreference, resetAll,
+      removeAlert, markAlertTriggered, setPreference, resetAll, recordView, noteFor, saveNote,
+      removeNote, saveScreen, removeScreen, recordSnapshot,
     ],
   );
 
@@ -461,12 +667,30 @@ async function persistCloud(uid: string, state: PersonalState) {
 
 /** Union merge used when guest data meets an empty account. */
 function mergeState(remote: PersonalState, local: PersonalState): PersonalState {
-  const seen = new Set(remote.watchlist);
+  const seenWatch = new Set(remote.watchlist);
+  const seenRecent = new Set(remote.recentlyViewed);
+  const seenNotes = new Set(remote.notes.map((n) => n.slug));
+  const seenDates = new Set(remote.snapshots.map((s) => s.date));
+
   return {
-    watchlist: [...remote.watchlist, ...local.watchlist.filter((s) => !seen.has(s))],
+    watchlist: [...remote.watchlist, ...local.watchlist.filter((s) => !seenWatch.has(s))],
     positions: [...remote.positions, ...local.positions],
     alerts: [...remote.alerts, ...local.alerts],
     preferences: { ...remote.preferences, ...local.preferences },
+    recentlyViewed: [
+      ...remote.recentlyViewed,
+      ...local.recentlyViewed.filter((s) => !seenRecent.has(s)),
+    ].slice(0, LIMITS.recentlyViewed),
+    // The account's own note wins on a collision — it is the one the user has
+    // seen most recently on their other devices.
+    notes: [...remote.notes, ...local.notes.filter((n) => !seenNotes.has(n.slug))].slice(
+      0,
+      LIMITS.notes,
+    ),
+    savedScreens: [...remote.savedScreens, ...local.savedScreens].slice(0, LIMITS.savedScreens),
+    snapshots: [...remote.snapshots, ...local.snapshots.filter((s) => !seenDates.has(s.date))]
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(-LIMITS.snapshots),
   };
 }
 

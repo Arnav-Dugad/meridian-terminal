@@ -53,11 +53,58 @@ export const DEFAULT_PREFERENCES: Preferences = {
   reducedMotion: false,
 };
 
+/** A research note pinned to an instrument. */
+export interface InstrumentNote {
+  slug: string;
+  symbol: string;
+  body: string;
+  updatedAt: number;
+}
+
+/** A saved screener configuration. */
+export interface SavedScreen {
+  id: string;
+  name: string;
+  regions: string[];
+  sectors: string[];
+  changeFilter: string;
+  rangeFilter: string;
+  minChange: number;
+  createdAt: number;
+}
+
+/**
+ * A day's closing valuation of the book.
+ *
+ * Portfolio value is otherwise a number with no history — you can see what you
+ * hold today but not whether it is working. One small document per day turns
+ * that into a performance curve, and because it is keyed by date it is
+ * idempotent: writing twice on the same day overwrites rather than duplicates.
+ */
+export interface PortfolioSnapshot {
+  /** `YYYY-MM-DD` in the user's own timezone — also the document id. */
+  date: string;
+  /** Total market value, in the base currency at the time. */
+  value: number;
+  cost: number;
+  pnl: number;
+  baseCurrency: Currency;
+  positionCount: number;
+  /** USD/INR at the time, so a past value can be re-expressed later. */
+  fxRate: number;
+  recordedAt: number;
+}
+
 export interface PersonalState {
   watchlist: string[];
   positions: Position[];
   alerts: PriceAlert[];
   preferences: Preferences;
+  /** Most-recent-first, capped. Powers the palette's empty state. */
+  recentlyViewed: string[];
+  notes: InstrumentNote[];
+  savedScreens: SavedScreen[];
+  snapshots: PortfolioSnapshot[];
 }
 
 export const EMPTY_PERSONAL: PersonalState = {
@@ -65,7 +112,20 @@ export const EMPTY_PERSONAL: PersonalState = {
   positions: [],
   alerts: [],
   preferences: DEFAULT_PREFERENCES,
+  recentlyViewed: [],
+  notes: [],
+  savedScreens: [],
+  snapshots: [],
 };
+
+/** Caps, enforced on write so a document cannot grow without bound. */
+export const LIMITS = {
+  recentlyViewed: 24,
+  notes: 200,
+  savedScreens: 30,
+  /** Roughly two years of daily points. */
+  snapshots: 730,
+} as const;
 
 /** Where the current personal data is being persisted. */
 export type StorageMode = "cloud" | "local";

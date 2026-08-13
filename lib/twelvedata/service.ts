@@ -1,6 +1,7 @@
 import "server-only";
 
 import { cached, peek } from "@/lib/twelvedata/cache";
+import { readCachedQuotes, writeCachedQuotes } from "@/lib/firebase/quote-cache";
 import { simulateFx, simulateQuote, simulateSeries } from "@/lib/twelvedata/simulate";
 import * as registry from "@/lib/providers/registry";
 import { fetchExchangeRate, twelveDataMeta } from "@/lib/providers/twelvedata";
@@ -76,9 +77,17 @@ export async function getQuotes(slugs: string[]): Promise<Resolved<Quote[]>> {
 
   if (instruments.length === 0) return { data: [], source: "simulated" };
 
-  // Serve anything still fresh from cache and only ask upstream for the rest.
-  // This is the single biggest saving in the system: a dashboard polling every
-  // few seconds mostly hits here and spends nothing.
+  /*
+   * Three tiers, cheapest first.
+   *
+   *   1. process cache   — free, but scoped to one warm instance
+   *   2. Firestore       — ~1ms, shared across every instance and cold start
+   *   3. provider        — 150–600ms and metered against a per-minute budget
+   *
+   * Tier 2 is what makes an 8-credit-a-minute plan survive real traffic: a
+   * figure fetched by one instance is available to all of them, so a cold
+   * start no longer re-spends budget on quotes that were already paid for.
+   */
   const fresh = new Map<string, Quote>();
   const stale: Instrument[] = [];
   for (const inst of instruments) {
@@ -87,9 +96,28 @@ export async function getQuotes(slugs: string[]): Promise<Resolved<Quote[]>> {
     else stale.push(inst);
   }
 
-  if (stale.length > 0 && registry.configuredProviderCount() > 0) {
+  let remaining = stale;
+
+  if (remaining.length > 0) {
+    const shared = await readCachedQuotes(remaining.map((i) => i.slug));
+    if (shared.size > 0) {
+      for (const [slug, quote] of shared) {
+        fresh.set(slug, quote);
+        const inst = findBySlug(slug);
+        // Promote into the process cache so the next request this instance
+        // serves does not pay even the Firestore round trip.
+        if (inst) {
+          const ttl = quoteTtl(inst.exchange);
+          void cached(quoteKey(inst), { ttl, maxAge: ttl * 20 }, async () => quote);
+        }
+      }
+      remaining = remaining.filter((i) => !shared.has(i.slug));
+    }
+  }
+
+  if (remaining.length > 0 && registry.configuredProviderCount() > 0) {
     try {
-      const result = await registry.fetchQuotes(stale);
+      const result = await registry.fetchQuotes(remaining);
 
       for (const quote of result.quotes) {
         fresh.set(quote.slug, quote);
@@ -98,6 +126,19 @@ export async function getQuotes(slugs: string[]): Promise<Resolved<Quote[]>> {
           const ttl = quoteTtl(inst.exchange);
           void cached(quoteKey(inst), { ttl, maxAge: ttl * 20 }, async () => quote);
         }
+      }
+
+      // Publish to the shared tier without blocking the response. The TTL is
+      // taken from the shortest-lived instrument in the batch so a 24/7 crypto
+      // window never extends a closed equity market's.
+      if (result.quotes.length > 0) {
+        const ttl = Math.min(
+          ...result.quotes.map((q) => {
+            const inst = findBySlug(q.slug);
+            return inst ? quoteTtl(inst.exchange) : 30_000;
+          }),
+        );
+        void writeCachedQuotes(result.quotes, ttl);
       }
     } catch {
       // The registry already failed over internally; reaching here means every

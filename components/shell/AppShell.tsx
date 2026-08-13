@@ -96,7 +96,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const tapeSymbols = watchlist.length > 0 ? watchlist.slice(0, 24) : DEFAULT_WATCHLIST;
 
   return (
-    <div className="flex min-h-dvh flex-col overflow-x-hidden bg-ink-950">
+    // `overflow-x-clip` rather than `-hidden`: hidden would make this a scroll
+    // container and take scrolling away from the document. See globals.css.
+    <div className="flex min-h-dvh flex-col overflow-x-clip bg-ink-950">
       <AlertWatcher />
       <ShortcutsOverlay />
 
@@ -195,7 +197,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             column past the viewport and the page scrolls sideways. This is the
             single most common cause of horizontal bleed in a flex layout.
           */}
-          <main id="main" className="pb-chrome min-w-0 flex-1 overflow-x-hidden">
+          <main id="main" className="pb-chrome min-w-0 flex-1 overflow-x-clip">
             {mounted ? (
               children
             ) : (

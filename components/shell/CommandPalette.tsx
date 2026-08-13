@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { searchUniverse, type Instrument } from "@/lib/market/universe";
 import { usePersonal } from "@/lib/store/personal";
 import {
+  IconActivity,
   IconBell,
   IconBriefcase,
   IconChart,
@@ -54,7 +55,6 @@ interface CommandPaletteValue {
 
 const CommandPaletteContext = createContext<CommandPaletteValue | null>(null);
 
-const RECENTS_KEY = "meridian.recents.v1";
 const MAX_RECENTS = 6;
 
 interface NavCommand {
@@ -75,6 +75,7 @@ const NAV_COMMANDS: NavCommand[] = [
   { id: "watchlist", label: "Watchlist", hint: "Your tracked instruments", href: "/watchlist", icon: <IconStar />, keywords: "saved favourites starred" },
   { id: "portfolio", label: "Portfolio", hint: "Holdings, P&L and risk", href: "/portfolio", icon: <IconBriefcase />, keywords: "holdings positions pnl profit returns" },
   { id: "alerts", label: "Alerts", hint: "Price triggers", href: "/alerts", icon: <IconBell />, keywords: "notifications triggers price" },
+  { id: "diagnostics", label: "Diagnostics", hint: "Are my data providers working?", href: "/diagnostics", icon: <IconActivity />, keywords: "health status api keys providers debug working" },
 ];
 
 export function CommandPaletteProvider({ children }: { children: ReactNode }) {
@@ -128,21 +129,17 @@ type Row =
 
 function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const router = useRouter();
-  const { toggleWatch, isWatched } = usePersonal();
+  // Recents come from the shared personal store rather than a private
+  // localStorage key, so history follows the account across devices along with
+  // everything else — and there is one source of truth for "recently viewed"
+  // instead of two that drift.
+  const { toggleWatch, isWatched, recentlyViewed, recordView } = usePersonal();
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
-  const [recents, setRecents] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(RECENTS_KEY);
-      if (raw) setRecents(JSON.parse(raw) as string[]);
-    } catch {
-      /* corrupt entry — start fresh */
-    }
-  }, []);
+  const recents = recentlyViewed.slice(0, MAX_RECENTS);
 
   useEffect(() => {
     if (open) {
@@ -198,30 +195,18 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
     setCursor((c) => Math.min(c, Math.max(0, rows.length - 1)));
   }, [rows.length]);
 
-  const pushRecent = useCallback((slug: string) => {
-    setRecents((prev) => {
-      const next = [slug, ...prev.filter((s) => s !== slug)].slice(0, MAX_RECENTS);
-      try {
-        window.localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
-      } catch {
-        /* storage unavailable — recents are a convenience, not state */
-      }
-      return next;
-    });
-  }, []);
-
   const activate = useCallback(
     (row: Row | undefined) => {
       if (!row) return;
       if (row.kind === "nav") {
         router.push(row.command.href);
       } else {
-        pushRecent(row.instrument.slug);
+        recordView(row.instrument.slug);
         router.push(`/stock/${encodeURIComponent(row.instrument.slug)}`);
       }
       onClose();
     },
-    [router, onClose, pushRecent],
+    [router, onClose, recordView],
   );
 
   const onKeyDown = useCallback(

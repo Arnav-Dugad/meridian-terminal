@@ -92,24 +92,31 @@ id — so it is safe to leave public.
 
 Everything is optional. Add what you have; each key lights up more of the product.
 
-### Market data — five providers, routed by budget
+### Market data — six providers, routed by coverage and budget
 
-The governing rule is **spend the scarcest budget last.**
+Two rules govern routing: **route to who actually has coverage**, then **spend the
+scarcest budget last.**
 
 | Provider | Free limit | Used for | Key |
 | --- | --- | --- | --- |
+| **Yahoo Finance** | ~60/min | India (NSE/BSE), all indices, all price history, universal fallback | *none needed* |
 | **Finnhub** | 60/min | US quotes, news, analyst consensus, earnings, peers | `FINNHUB_API_KEY` |
-| **CoinGecko** | ~30/min | Crypto quotes + history | `COINGECKO_API_KEY` *(optional — works without)* |
-| **Twelve Data** | 8/min | India/NSE, and all price history | `TWELVE_DATA_API_KEY` |
+| **CoinGecko** | ~30/min | Crypto quotes + history | `COINGECKO_API_KEY` *(optional)* |
+| **Twelve Data** | 8/min | Secondary US quotes and history | `TWELVE_DATA_API_KEY` |
 | **FMP** | 250/day | Fundamentals, cached 24h | `FMP_API_KEY` |
-| **Alpha Vantage** | 25/day | Last-resort fallback | `ALPHA_VANTAGE_API_KEY` |
+| **Alpha Vantage** | 25/day | Last-resort fallback; reaches BSE | `ALPHA_VANTAGE_API_KEY` |
 
-**Add Finnhub first.** It has the largest budget and is the sole source of news, analyst
-ratings, earnings and peers.
+**Add Finnhub first.** It is the sole source of news, analyst ratings, earnings and peers.
 
-Concretely: a US quote goes to Finnhub *because* Twelve Data's eight credits are the only
-way to price an NSE listing. Spending them on AAPL is what made RELIANCE fall back to
-simulated in the single-provider design.
+> **Why Yahoo is in here.** Twelve Data's free tier returns a hard 404 for NSE and BSE
+> symbols — *"available starting with the Grow plan"* — so on a free stack there was no
+> route to an Indian quote at all. Yahoo's chart endpoint serves NSE, BSE, both countries'
+> indices and crypto with full OHLCV history and no key.
+>
+> It is an **undocumented endpoint**: not contractual, capable of rate-limiting datacentre
+> IPs, and subject to change. That is exactly why it sits inside the same failover chain as
+> everything else — if it stops answering, the registry moves on and the UI relabels the
+> figures. It is used because the alternative for Indian data is nothing.
 
 ```bash
 FINNHUB_API_KEY=
@@ -120,13 +127,22 @@ FMP_API_KEY=
 ALPHA_VANTAGE_API_KEY=
 ```
 
-> **On Indian data.** Twelve Data's free tier covers US markets only. NSE and BSE quotes
-> need a paid plan, so India will read `Simulated` on a free key. That is a subscription
-> boundary, not a bug — and the app says so explicitly rather than showing a plausible
-> wrong number.
-
 Keys are server-only and deliberately **not** `NEXT_PUBLIC_`. Every provider module imports
 `server-only`, so an accidental client import is a build error rather than a leaked key.
+
+### Checking your keys work — `/diagnostics`
+
+There is a page for this, because "is my key working?" is otherwise unanswerable from the
+outside: a missing key, an out-of-plan symbol, a decommissioned endpoint version and a
+spent budget all present identically as a figure quietly labelled `Simulated`.
+
+`/diagnostics` issues a **real request to every configured provider** when it loads and
+reports latency, a sample of the response, and — on failure — the upstream's own error
+message. A config-flag check would have reported FMP as healthy for the entire period its
+v3 endpoints were returning `Legacy Endpoint` errors on a perfectly valid key.
+
+> **Note on FMP:** this codebase targets FMP's `/stable/` API. The `/api/v3/` endpoints
+> were decommissioned on 31 August 2025 and now reject every request regardless of key.
 
 ### Firebase — accounts and sync
 
@@ -231,6 +247,49 @@ control.
 Signed in, a single Firestore document with a live listener. Otherwise `localStorage`. The
 interface is identical, and guest work is merged into the account on first sign-in.
 
+### What Firebase stores, and why it is shaped this way
+
+**`users/{uid}`** — one document, one listener, atomic writes.
+
+| Field | Purpose |
+| --- | --- |
+| `watchlist` | Tracked instruments |
+| `positions` | Holdings with native-currency cost basis |
+| `alerts` | Price triggers, armed and fired |
+| `preferences` | Base currency, chart style, pinned indicators |
+| `recentlyViewed` | Deduplicated view history — powers the palette's empty state |
+| `notes` | Per-instrument research notes, autosaved |
+| `savedScreens` | Screener presets |
+| `snapshots` | One daily book valuation, keyed by date |
+
+One document rather than subcollections: a personal book is tens of rows, so one read, one
+listener and atomic writes beat N reads and a fan-out of listeners. Every array is capped
+on write (`LIMITS` in `lib/store/types.ts`) and the caps are re-asserted in
+`firestore.rules`, so a compromised client cannot grow a document that is read on every
+page load.
+
+`snapshots` is the one worth explaining. A portfolio page without history answers *what do
+I hold* but not *is it working*. Each day the page is opened writes one small entry keyed
+by `YYYY-MM-DD` in the user's own timezone — idempotent, so it overwrites rather than
+duplicating, and the performance curve builds itself with no scheduled job. Writes are
+skipped when the value has not moved and when quotes have not yet landed, so opening the
+page repeatedly does not churn the document.
+
+**`quoteCache/{slug}`** — a shared market-data cache, written only by the server.
+
+The in-process cache is fast but scoped to one warm serverless instance. Every cold start
+and every parallel instance begins empty and re-spends provider budget on figures another
+instance fetched seconds ago. This adds a middle tier:
+
+```
+process cache  →  Firestore  →  provider
+   (free)         (~1 ms)      (150–600 ms, metered)
+```
+
+It obeys four rules: fail open always (Firestore being down must never break a quote),
+never cache a simulated value, write in bounded batches, and read-repair only. Clients are
+denied all access to it — the server writes through the Admin SDK, which bypasses rules.
+
 ---
 
 ## Project layout
@@ -299,8 +358,10 @@ Dark by commitment — this is a terminal, and one palette lets the data carry t
 
 Stated plainly, because a README that only lists strengths is a sales page.
 
-- **Indian data needs a paid Twelve Data plan.** The free tier is US-only. India reads
-  `Simulated` until you upgrade.
+- **Indian data depends on Yahoo Finance, an undocumented endpoint.** Twelve Data's free
+  tier cannot reach NSE or BSE. Yahoo can, and does, but it is not a contractual API and
+  may rate-limit datacentre IPs. Alpha Vantage backs it up via BSE at 25 calls a day. If
+  both fail, India falls back to simulation and says so.
 - **News, fundamentals, analyst ratings, earnings and peers are US-only** on these free
   tiers. The panels say so rather than rendering empty.
 - **Alerts fire while a Meridian tab is open.** Push to a closed browser needs a

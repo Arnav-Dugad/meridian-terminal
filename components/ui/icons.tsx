@@ -220,6 +220,12 @@ export const IconCommand = (p: IconProps) => (
   </Icon>
 );
 
+export const IconActivity = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M1.6 8h2.8l1.8-4.6 2.6 9.2 1.8-4.6h3.8" />
+  </Icon>
+);
+
 export const IconNews = (p: IconProps) => (
   <Icon {...p}>
     <path d="M11.4 3.4H2.6a1 1 0 0 0-1 1v7.4a1.2 1.2 0 0 0 1.2 1.2h9.6a1.2 1.2 0 0 0 1.2-1.2V5.6a1 1 0 0 0-1-1h-1.2v7.2" />

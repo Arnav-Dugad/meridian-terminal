@@ -32,17 +32,25 @@ service cloud.firestore {
     // document that is billed by size and read on every page load.
     function withinSizeLimits() {
       let d = request.resource.data;
-      return (!('watchlist' in d) || d.watchlist.size() <= 200)
-          && (!('positions' in d) || d.positions.size() <= 300)
-          && (!('alerts' in d)    || d.alerts.size()    <= 200);
+      return (!('watchlist' in d)      || d.watchlist.size()      <= 200)
+          && (!('positions' in d)      || d.positions.size()      <= 300)
+          && (!('alerts' in d)         || d.alerts.size()         <= 200)
+          && (!('recentlyViewed' in d) || d.recentlyViewed.size() <= 50)
+          && (!('notes' in d)          || d.notes.size()          <= 200)
+          && (!('savedScreens' in d)   || d.savedScreens.size()   <= 30)
+          && (!('snapshots' in d)      || d.snapshots.size()      <= 800);
     }
 
     function hasExpectedTypes() {
       let d = request.resource.data;
-      return (!('watchlist' in d)   || d.watchlist is list)
-          && (!('positions' in d)   || d.positions is list)
-          && (!('alerts' in d)      || d.alerts is list)
-          && (!('preferences' in d) || d.preferences is map);
+      return (!('watchlist' in d)      || d.watchlist is list)
+          && (!('positions' in d)      || d.positions is list)
+          && (!('alerts' in d)         || d.alerts is list)
+          && (!('recentlyViewed' in d) || d.recentlyViewed is list)
+          && (!('notes' in d)          || d.notes is list)
+          && (!('savedScreens' in d)   || d.savedScreens is list)
+          && (!('snapshots' in d)      || d.snapshots is list)
+          && (!('preferences' in d)    || d.preferences is map);
     }
 
     match /users/{userId} {
@@ -60,7 +68,19 @@ service cloud.firestore {
       }
     }
 
-    // Default deny.
+    // ── Shared market-data cache ───────────────────────────────────────────
+    //
+    // Written exclusively by the server through the Admin SDK, which bypasses
+    // these rules entirely. Clients are denied both reads and writes: the data
+    // is not secret, but a client that could read it would be reading market
+    // figures from a store with no TTL enforcement, and a client that could
+    // write it could poison every other user's prices.
+    match /quoteCache/{symbol} {
+      allow read, write: if false;
+    }
+
+    // Default deny. Any collection added later is locked until someone writes
+    // a rule for it, rather than inheriting access by accident.
     match /{document=**} {
       allow read, write: if false;
     }
