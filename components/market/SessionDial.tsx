@@ -7,6 +7,8 @@ import { EXCHANGES, formatCountdown, sessionState, type ExchangeCode } from "@/l
 import { convertMinutes, formatOffset, localTimezone, minutesInZone } from "@/lib/market/timezone";
 import { cn } from "@/lib/utils";
 import { StatusDot } from "@/components/ui/primitives";
+import { chartPalette } from "@/lib/theme";
+import { useThemeVersion } from "@/lib/hooks/theme-context";
 
 /**
  * A twenty-four hour dial showing both trading sessions against the viewer's
@@ -54,6 +56,9 @@ export function SessionDial({
 
   const tz = useMemo(() => localTimezone(), []);
 
+  useThemeVersion();
+  const palette = chartPalette();
+
   const sessions = useMemo<DialSession[]>(() => {
     if (now == null) return [];
     return exchanges.map((code) => {
@@ -87,12 +92,18 @@ export function SessionDial({
           aria-label="Twenty-four hour trading session dial"
         >
           {/* Track */}
+          {/*
+            Strokes take a colour string, so the dial paints with the resolved
+            foreground token at varying opacity rather than a fixed ivory —
+            which would be invisible on a light background.
+          */}
           <circle
             cx={CENTRE}
             cy={CENTRE}
             r={RADIUS}
             fill="none"
-            stroke="rgba(244,242,236,0.06)"
+            stroke={palette.text}
+            strokeOpacity={0.09}
             strokeWidth={TRACK_WIDTH}
           />
 
@@ -111,7 +122,8 @@ export function SessionDial({
                 y1={a.y}
                 x2={b.x}
                 y2={b.y}
-                stroke={major ? "rgba(244,242,236,0.28)" : "rgba(244,242,236,0.11)"}
+                stroke={palette.text}
+                strokeOpacity={major ? 0.42 : 0.16}
                 strokeWidth={major ? 1.2 : 1}
               />
             );
@@ -142,7 +154,7 @@ export function SessionDial({
                 y1={CENTRE}
                 x2={polar(CENTRE, CENTRE, RADIUS + 7, handAngle).x}
                 y2={polar(CENTRE, CENTRE, RADIUS + 7, handAngle).y}
-                stroke="#f4f2ec"
+                stroke={palette.pillText}
                 strokeWidth={1.1}
                 strokeOpacity={0.62}
               />
@@ -150,12 +162,12 @@ export function SessionDial({
                 cx={polar(CENTRE, CENTRE, RADIUS, handAngle).x}
                 cy={polar(CENTRE, CENTRE, RADIUS, handAngle).y}
                 r={3}
-                fill="#f4f2ec"
+                fill={palette.pillText}
               />
             </>
           )}
 
-          <circle cx={CENTRE} cy={CENTRE} r={2} fill="rgba(244,242,236,0.4)" />
+          <circle cx={CENTRE} cy={CENTRE} r={2} fill={palette.text} fillOpacity={0.55} />
         </svg>
 
         {/* Centre readout, upright inside the rotated ring. */}

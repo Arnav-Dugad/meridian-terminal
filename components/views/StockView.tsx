@@ -10,6 +10,8 @@ import { DataSourceNotice } from "@/components/market/DataSourceNotice";
 import { AlertComposer } from "@/components/market/AlertComposer";
 import { NewsPanel } from "@/components/market/NewsFeed";
 import { InstrumentNotes } from "@/components/market/InstrumentNotes";
+import { BacktestPanel } from "@/components/market/BacktestPanel";
+import { OptionsPanel } from "@/components/market/OptionsPanel";
 import {
   AnalystPanel,
   EarningsPanel,
@@ -503,6 +505,23 @@ export function StockView({
             </div>
           </div>
         )}
+
+        {/* Strategy testing runs on whatever range the chart is showing, so it
+            answers "would this rule have worked on what I'm looking at". */}
+        <BacktestPanel
+          candles={candles}
+          symbol={quote.symbol}
+          periodsPerYear={
+            RANGE_SPEC[range].interval === "1week"
+              ? 52
+              : RANGE_SPEC[range].interval === "1month"
+                ? 12
+                : 252
+          }
+        />
+
+        {/* Options exist for US listings on the free data tiers. */}
+        {instrument?.region === "US" && <OptionsPanel slug={slug} currency={currency} />}
 
         {/* Notes sit last: they are the thing you come back to, not the thing
             you arrive for. Available for every instrument, not just equities. */}

@@ -213,25 +213,24 @@ export default async function LandingPage() {
           </div>
         </section>
 
-        {/* ══ Engineering ═══════════════════════════════════════════════════ */}
-        <section id="engineering" className="border-b border-line py-24 sm:py-32">
+        {/* ══ India, properly ═══════════════════════════════════════════════ */}
+        <section id="india" className="border-b border-line py-24 sm:py-32">
           <div className="mx-auto max-w-[1240px] px-5 sm:px-8">
             <div className="grid gap-14 lg:grid-cols-[0.85fr_1.15fr] lg:gap-20">
               <Reveal>
-                <p className="label-micro text-signal">Engineering</p>
+                <p className="label-micro text-signal">Built for India too</p>
                 <h2 className="display mt-5 text-[clamp(2rem,4.4vw,3.4rem)] text-ivory">
-                  The constraint is credits, not compute.
+                  Not a footnote on someone else's terminal.
                 </h2>
                 <p className="mt-7 max-w-[46ch] text-[14px] leading-relaxed text-ivory-80">
-                  A market data plan bills per symbol per request. That single fact
-                  determines the whole backend: what gets cached, for how long, what
-                  degrades, and what is computed locally instead of bought. Everything
-                  below is a consequence of taking it seriously.
+                  Most tools bolt India on: dollar prices, Western digit grouping, and no
+                  sense of what actually moves the Nifty. Meridian starts from the other
+                  end.
                 </p>
               </Reveal>
 
               <div className="space-y-px overflow-hidden rounded-md border border-line bg-line">
-                {ENGINEERING.map((item, i) => (
+                {INDIA_POINTS.map((item, i) => (
                   <Reveal key={item.title} delay={0.05 * i}>
                     <div className="bg-ink-900 p-6">
                       <div className="flex items-baseline gap-3">
@@ -406,30 +405,22 @@ function Capability({
   );
 }
 
-const ENGINEERING = [
+const INDIA_POINTS = [
   {
-    title: "Single-flight cache with stale-while-revalidate",
-    body: "Twenty components asking for RELIANCE at once produce one upstream call. Past its TTL the cached value is still served while a refresh runs behind the request, so a slow provider never blocks a render — and past a hard ceiling it is refused outright, because a stale quote presented as current is worse than no quote.",
+    title: "Rupees read like rupees",
+    body: "Market cap on an NSE listing shows in crore, grouped 2,32,10,000 the way you actually write it. The same panel on a Nasdaq listing shows billions. Neither market is translated into the other's units.",
   },
   {
-    title: "A credit budget, not a retry loop",
-    body: "Requests take a ticket against a sliding one-minute window sized to your plan. If the wait exceeds what a serverless invocation should hold open, the caller degrades to cache or simulation instead of stalling — a rate limit is answered by backing off, not by hammering it.",
+    title: "Institutional flows, every session",
+    body: "How much foreign and domestic institutions bought and sold — the number that explains more Nifty movement than any indicator. Almost no consumer terminal surfaces it; here it has its own page, with history that builds as you use it.",
   },
   {
-    title: "One stream for the whole app",
-    body: "Components declare the symbols they need and a reference-counted subscription set drives a single server-sent-events connection. Only changed prices go over the wire, and a blocked stream falls back to interval polling rather than freezing.",
+    title: "The gap between the two closes",
+    body: "Mumbai shuts at 15:30. New York opens five and a half hours later. Meridian shows you what happened in between, and which of your Indian holdings historically move with the US names that are about to trade.",
   },
   {
-    title: "Indicators computed locally",
-    body: "RSI, MACD, Bollinger, ATR, VWAP, correlation and beta are pure functions of bars already downloaded. Buying them per-symbol per-indicator would put a network round trip between the user and a slider they are dragging.",
-  },
-  {
-    title: "Sessions from an httpOnly cookie",
-    body: "The Firebase ID token is exchanged server-side for a cookie JavaScript cannot read, which is what lets authenticated pages render on the server with no unauthenticated flash — and removes the exfiltration path that storing tokens in localStorage would open.",
-  },
-  {
-    title: "Degrades to a coherent simulation",
-    body: "With no API key, or during an outage, prices come from a three-factor model — global tide, regional index, sector, plus idiosyncratic noise over fractal Brownian motion. Names inside a sector still move together, so the product stays explorable instead of showing a wall of dashes. It is labelled as simulated everywhere it appears.",
+    title: "One book, two currencies",
+    body: "Hold Reliance and Nvidia side by side. Totals convert at the live rate, so you can see exactly how much of your return came from the market and how much came from the rupee.",
   },
 ];
 

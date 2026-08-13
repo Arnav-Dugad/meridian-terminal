@@ -9,6 +9,8 @@ import { formatCompactMoney, formatDate, formatPercent, formatPrice } from "@/li
 import { EmptyState, Panel, PanelHeader, Badge } from "@/components/ui/primitives";
 import { IconChart } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
+import { chartPalette } from "@/lib/theme";
+import { useThemeVersion } from "@/lib/hooks/theme-context";
 
 /**
  * Book value over time.
@@ -32,6 +34,9 @@ export function PortfolioHistory({
   baseCurrency: Currency;
   className?: string;
 }) {
+  useThemeVersion();
+  const palette = chartPalette();
+
   const model = useMemo(() => {
     // Currency is stored per snapshot, so switching base currency must not
     // silently plot rupees against dollars on one axis.
@@ -119,8 +124,8 @@ export function PortfolioHistory({
         >
           <defs>
             <linearGradient id="pnl-band" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={up ? "#3fbf7f" : "#f0563f"} stopOpacity={0.22} />
-              <stop offset="100%" stopColor={up ? "#3fbf7f" : "#f0563f"} stopOpacity={0.04} />
+              <stop offset="0%" stopColor={up ? palette.up : palette.down} stopOpacity={0.22} />
+              <stop offset="100%" stopColor={up ? palette.up : palette.down} stopOpacity={0.04} />
             </linearGradient>
           </defs>
 
@@ -136,7 +141,7 @@ export function PortfolioHistory({
           <path
             d={costPath}
             fill="none"
-            stroke="#6a6862"
+            stroke={palette.textDim}
             strokeWidth={1.2}
             strokeDasharray="3 4"
           />
@@ -144,7 +149,7 @@ export function PortfolioHistory({
           <motion.path
             d={valuePath}
             fill="none"
-            stroke={up ? "#3fbf7f" : "#f0563f"}
+            stroke={up ? palette.up : palette.down}
             strokeWidth={1.8}
             strokeLinejoin="round"
             strokeLinecap="round"
@@ -157,8 +162,8 @@ export function PortfolioHistory({
             cx={x(model.points.length - 1)}
             cy={y(model.last.value)}
             r={3.5}
-            fill={up ? "#3fbf7f" : "#f0563f"}
-            stroke="#0b0b0d"
+            fill={up ? palette.up : palette.down}
+            stroke={palette.surface}
             strokeWidth={1.5}
           />
         </svg>

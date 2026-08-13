@@ -11,6 +11,7 @@ import { usePersonal } from "@/lib/store/personal";
 import { useCommandPalette } from "@/components/shell/CommandPalette";
 import { AlertWatcher } from "@/components/shell/AlertWatcher";
 import { ShortcutsOverlay } from "@/components/shell/ShortcutsOverlay";
+import { PreferenceSync } from "@/components/shell/PreferenceSync";
 import { Glyph } from "@/components/brand/Wordmark";
 import { Tape } from "@/components/market/Tape";
 import { MarketClocks } from "@/components/shell/MarketClocks";
@@ -27,6 +28,7 @@ import {
   IconPulse,
   IconScale,
   IconSearch,
+  IconSettings,
   IconStar,
   IconUser,
 } from "@/components/ui/icons";
@@ -50,6 +52,7 @@ const NAV = [
   { href: "/markets", label: "Markets", icon: <IconGlobe /> },
   { href: "/screener", label: "Screener", icon: <IconFilter /> },
   { href: "/compare", label: "Compare", icon: <IconScale /> },
+  { href: "/flows", label: "Flows", icon: <IconScale /> },
   { href: "/news", label: "Newsroom", icon: <IconNews /> },
   { href: "/watchlist", label: "Watchlist", icon: <IconStar /> },
   { href: "/portfolio", label: "Portfolio", icon: <IconBriefcase /> },
@@ -69,7 +72,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const { watchlist, alerts } = usePersonal();
+  const { watchlist, alerts, preferences } = usePersonal();
 
   useEffect(() => {
     setMounted(true);
@@ -94,6 +97,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const activeAlerts = alerts.filter((a) => a.active).length;
   const tapeSymbols = watchlist.length > 0 ? watchlist.slice(0, 24) : DEFAULT_WATCHLIST;
+  const showTape = preferences.showTape;
 
   return (
     // `overflow-x-clip` rather than `-hidden`: hidden would make this a scroll
@@ -101,6 +105,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex min-h-dvh flex-col overflow-x-clip bg-ink-950">
       <AlertWatcher />
       <ShortcutsOverlay />
+      <PreferenceSync />
 
       <div className="flex flex-1">
         {/* ── Rail ────────────────────────────────────────────────────────── */}
@@ -170,7 +175,23 @@ export function AppShell({ children }: { children: ReactNode }) {
             })}
           </nav>
 
-          <div className="border-t border-line p-2">
+          <div className="space-y-0.5 border-t border-line p-2">
+            <Link
+              href="/settings"
+              title={collapsed ? "Settings" : undefined}
+              className={cn(
+                "flex h-9 items-center gap-3 rounded-sm px-2.5 transition-colors duration-150",
+                pathname.startsWith("/settings")
+                  ? "bg-ink-800 text-ivory"
+                  : "text-ivory-60 hover:bg-ink-850 hover:text-ivory",
+              )}
+            >
+              <IconSettings
+                className={cn("shrink-0", pathname.startsWith("/settings") && "text-signal")}
+              />
+              {!collapsed && <span className="truncate text-[13px]">Settings</span>}
+            </Link>
+
             <button
               onClick={toggleRail}
               className="flex h-8 w-full items-center gap-3 rounded-sm px-2.5 text-ivory-40 transition-colors hover:bg-ink-850 hover:text-ivory-80"
@@ -215,9 +236,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           they end up overlapping the moment either changes height. */}
       <div className="safe-bottom fixed inset-x-0 bottom-0 z-30">
         <MobileNav pathname={pathname} activeAlerts={activeAlerts} />
-        <div className="border-t border-line bg-ink-1000/92 backdrop-blur-md">
-          <Tape symbols={tapeSymbols} speed={1.15} />
-        </div>
+        {showTape && (
+          <div className="border-t border-line bg-ink-1000/92 backdrop-blur-md">
+            <Tape symbols={tapeSymbols} speed={1.15} />
+          </div>
+        )}
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import { IBM_Plex_Mono, Inter, Instrument_Serif } from "next/font/google";
 
 import "./globals.css";
 import { Providers } from "@/app/providers";
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 /**
  * Three families, each doing one job.
@@ -86,6 +87,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${inter.variable} ${instrument.variable} ${plexMono.variable}`}
       suppressHydrationWarning
     >
+      <head>
+        {/*
+          Applies the stored theme before the first paint. An effect would run
+          after hydration, which means one frame in the wrong palette on every
+          navigation — the most conspicuous flaw a theme switcher can have.
+        */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="grain-fixed min-h-dvh bg-ink-950 text-ivory antialiased">
         <a
           href="#main"

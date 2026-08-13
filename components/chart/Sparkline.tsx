@@ -4,6 +4,8 @@ import { useId, useMemo } from "react";
 import { motion, useReducedMotion } from "motion/react";
 
 import { cn } from "@/lib/utils";
+import { chartPalette } from "@/lib/theme";
+import { useThemeVersion } from "@/lib/hooks/theme-context";
 
 interface SparklineProps {
   values: number[];
@@ -41,6 +43,8 @@ export function Sparkline({
 }: SparklineProps) {
   const gradientId = useId();
   const shouldReduceMotion = useReducedMotion();
+  // Forces a re-render on a theme switch so the stroke is recomputed.
+  useThemeVersion();
 
   const geometry = useMemo(() => {
     if (values.length < 2) return null;
@@ -86,7 +90,10 @@ export function Sparkline({
     );
   }
 
-  const stroke = color ?? (geometry.rising ? "#3fbf7f" : "#f0563f");
+  // Read from the theme rather than hardcoding: an SVG stroke attribute takes
+  // a colour string, so it cannot inherit the token the way a CSS class would.
+  const palette = chartPalette();
+  const stroke = color ?? (geometry.rising ? palette.up : palette.down);
   const shouldAnimate = animate && !shouldReduceMotion;
 
   return (

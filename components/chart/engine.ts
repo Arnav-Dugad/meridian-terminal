@@ -1,5 +1,6 @@
 import type { Candle } from "@/lib/twelvedata/types";
 import type { MaybeNumber } from "@/lib/analytics/indicators";
+import { chartPalette } from "@/lib/theme";
 
 /**
  * The price chart renderer.
@@ -60,27 +61,14 @@ export interface ChartOptions {
   reducedMotion?: boolean;
 }
 
-interface Palette {
-  up: string;
-  down: string;
-  grid: string;
-  axis: string;
-  text: string;
-  textDim: string;
-  crosshair: string;
-  surface: string;
-}
-
-const PALETTE: Palette = {
-  up: "#3fbf7f",
-  down: "#f0563f",
-  grid: "rgba(244,242,236,0.055)",
-  axis: "rgba(244,242,236,0.11)",
-  text: "#c9c6bd",
-  textDim: "#6a6862",
-  crosshair: "rgba(244,242,236,0.34)",
-  surface: "#0b0b0d",
-};
+/**
+ * Canvas has no cascade, so the palette is resolved from the CSS custom
+ * properties on every draw. `chartPalette()` memoises per theme, making this a
+ * map lookup rather than a `getComputedStyle` call per frame — and it means a
+ * theme switch repaints the chart correctly with no code here knowing that
+ * themes exist.
+ */
+type Palette = ReturnType<typeof chartPalette>;
 
 /** Gutters, in CSS pixels. */
 const PAD = { top: 14, right: 62, bottom: 26, left: 8 };
@@ -112,6 +100,9 @@ export class ChartEngine {
 
   private resizeObserver: ResizeObserver | null = null;
   private destroyed = false;
+
+  /** Re-resolved at the top of every draw; cached per theme upstream. */
+  private palette: Palette = chartPalette();
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -272,6 +263,7 @@ export class ChartEngine {
   private draw() {
     if (this.destroyed || this.width === 0 || this.height === 0) return;
     const { ctx } = this;
+    this.palette = chartPalette();
     const data = this.frame.length ? this.frame : this.candles;
 
     ctx.clearRect(0, 0, this.width, this.height);
@@ -303,7 +295,7 @@ export class ChartEngine {
     const { ctx } = this;
     ctx.save();
     ctx.font = AXIS_FONT;
-    ctx.fillStyle = PALETTE.textDim;
+    ctx.fillStyle = this.palette.textDim;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("NO DATA", this.width / 2, this.height / 2);
@@ -380,7 +372,7 @@ export class ChartEngine {
     const ticks = niceTicks(scale.min, scale.max, Math.max(3, Math.floor(plot.h / 52)));
 
     ctx.save();
-    ctx.strokeStyle = PALETTE.grid;
+    ctx.strokeStyle = this.palette.grid;
     ctx.lineWidth = 1 / this.dpr;
     ctx.beginPath();
     for (const t of ticks) {
@@ -402,7 +394,7 @@ export class ChartEngine {
     const first = data[0]!.c;
     const lastC = data[data.length - 1]!.c;
     const rising = lastC >= first;
-    const stroke = rising ? PALETTE.up : PALETTE.down;
+    const stroke = rising ? this.palette.up : this.palette.down;
 
     ctx.save();
 
@@ -462,7 +454,7 @@ export class ChartEngine {
       const c = data[i]!;
       const x = this.xAt(i, data.length, plot);
       const up = c.c >= c.o;
-      const color = up ? PALETTE.up : PALETTE.down;
+      const color = up ? this.palette.up : this.palette.down;
 
       // Below ~2px per slot, bodies collapse into noise; draw the range only.
       if (thin) {
@@ -515,7 +507,7 @@ export class ChartEngine {
       const c = data[i]!;
       const h = (c.v / maxV) * plot.volumeH * 0.92;
       const x = this.xAt(i, data.length, plot) - barW / 2;
-      ctx.fillStyle = withAlpha(c.c >= c.o ? PALETTE.up : PALETTE.down, 0.26);
+      ctx.fillStyle = withAlpha(c.c >= c.o ? this.palette.up : this.palette.down, 0.26);
       ctx.fillRect(x, plot.volumeY + plot.volumeH - h, barW, h);
     }
     ctx.restore();
@@ -630,7 +622,7 @@ export class ChartEngine {
 
     ctx.save();
     ctx.font = AXIS_FONT;
-    ctx.fillStyle = PALETTE.textDim;
+    ctx.fillStyle = this.palette.textDim;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
 
@@ -654,7 +646,7 @@ export class ChartEngine {
 
     ctx.save();
     ctx.font = AXIS_FONT;
-    ctx.fillStyle = PALETTE.textDim;
+    ctx.fillStyle = this.palette.textDim;
     ctx.textBaseline = "top";
 
     for (let i = 0; i < data.length; i += stride) {
@@ -675,7 +667,7 @@ export class ChartEngine {
     const { ctx } = this;
     const last = data[data.length - 1]!;
     const first = data[0]!.c;
-    const color = last.c >= first ? PALETTE.up : PALETTE.down;
+    const color = last.c >= first ? this.palette.up : this.palette.down;
 
     const x = this.xAt(data.length - 1, data.length, plot);
     const y = scale.toY(last.c);
@@ -692,7 +684,7 @@ export class ChartEngine {
     ctx.arc(x, y, 2.6, 0, Math.PI * 2);
     ctx.fillStyle = color;
     ctx.fill();
-    ctx.strokeStyle = PALETTE.surface;
+    ctx.strokeStyle = this.palette.surface;
     ctx.lineWidth = 1.2;
     ctx.stroke();
     ctx.restore();
@@ -725,7 +717,7 @@ export class ChartEngine {
 
     const { ctx } = this;
     ctx.save();
-    ctx.strokeStyle = PALETTE.crosshair;
+    ctx.strokeStyle = this.palette.crosshair;
     ctx.lineWidth = 1 / this.dpr;
     ctx.setLineDash([2, 3]);
 
@@ -746,10 +738,10 @@ export class ChartEngine {
     const label = fmt(scale.toPrice(hy));
     ctx.font = AXIS_FONT;
     const tw = ctx.measureText(label).width;
-    ctx.fillStyle = "#1e1e26";
+    ctx.fillStyle = this.palette.pillBg;
     roundRect(ctx, plot.x + plot.w + 4, hy - 8, tw + 10, 16, 3);
     ctx.fill();
-    ctx.fillStyle = "#f4f2ec";
+    ctx.fillStyle = this.palette.pillText;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.fillText(label, plot.x + plot.w + 9, hy);
@@ -757,9 +749,9 @@ export class ChartEngine {
     // Dot on the series itself.
     ctx.beginPath();
     ctx.arc(x, y, 3, 0, Math.PI * 2);
-    ctx.fillStyle = PALETTE.surface;
+    ctx.fillStyle = this.palette.surface;
     ctx.fill();
-    ctx.strokeStyle = candle.c >= candle.o ? PALETTE.up : PALETTE.down;
+    ctx.strokeStyle = candle.c >= candle.o ? this.palette.up : this.palette.down;
     ctx.lineWidth = 1.6;
     ctx.stroke();
     ctx.restore();

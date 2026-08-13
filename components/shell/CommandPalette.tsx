@@ -17,7 +17,6 @@ import { cn } from "@/lib/utils";
 import { searchUniverse, type Instrument } from "@/lib/market/universe";
 import { usePersonal } from "@/lib/store/personal";
 import {
-  IconActivity,
   IconBell,
   IconBriefcase,
   IconChart,
@@ -29,6 +28,7 @@ import {
   IconPulse,
   IconScale,
   IconSearch,
+  IconSettings,
   IconStar,
 } from "@/components/ui/icons";
 import { Badge } from "@/components/ui/primitives";
@@ -74,8 +74,9 @@ const NAV_COMMANDS: NavCommand[] = [
   { id: "news", label: "Newsroom", hint: "Market and company headlines", href: "/news", icon: <IconNews />, keywords: "news headlines press articles" },
   { id: "watchlist", label: "Watchlist", hint: "Your tracked instruments", href: "/watchlist", icon: <IconStar />, keywords: "saved favourites starred" },
   { id: "portfolio", label: "Portfolio", hint: "Holdings, P&L and risk", href: "/portfolio", icon: <IconBriefcase />, keywords: "holdings positions pnl profit returns" },
+  { id: "flows", label: "Institutional flows", hint: "What foreign and domestic money did today", href: "/flows", icon: <IconScale />, keywords: "fii dii foreign domestic institutions india buying selling" },
   { id: "alerts", label: "Alerts", hint: "Price triggers", href: "/alerts", icon: <IconBell />, keywords: "notifications triggers price" },
-  { id: "diagnostics", label: "Diagnostics", hint: "Are my data providers working?", href: "/diagnostics", icon: <IconActivity />, keywords: "health status api keys providers debug working" },
+  { id: "settings", label: "Settings", hint: "Theme, currency, charts and your data", href: "/settings", icon: <IconSettings />, keywords: "preferences theme light dark mode account export" },
 ];
 
 export function CommandPaletteProvider({ children }: { children: ReactNode }) {

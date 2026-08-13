@@ -123,6 +123,14 @@ function coerceState(raw: unknown): PersonalState {
     : [];
 
   const prefsRaw = (r["preferences"] ?? {}) as Record<string, unknown>;
+  const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T =>
+    typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
+  const clampNum = (v: unknown, min: number, max: number, fallback: number) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+  };
+  const bool = (v: unknown, fallback: boolean) => (typeof v === "boolean" ? v : fallback);
+
   const preferences: Preferences = {
     baseCurrency: prefsRaw["baseCurrency"] === "USD" ? "USD" : "INR",
     defaultRange: (typeof prefsRaw["defaultRange"] === "string"
@@ -133,6 +141,14 @@ function coerceState(raw: unknown): PersonalState {
       ? (prefsRaw["indicators"] as unknown[]).filter((x): x is string => typeof x === "string")
       : DEFAULT_PREFERENCES.indicators,
     reducedMotion: prefsRaw["reducedMotion"] === true,
+    theme: oneOf(prefsRaw["theme"], ["dark", "light", "system"] as const, DEFAULT_PREFERENCES.theme),
+    density: oneOf(prefsRaw["density"], ["comfortable", "compact"] as const, DEFAULT_PREFERENCES.density),
+    homeRegion: oneOf(prefsRaw["homeRegion"], ["IN", "US", "GLOBAL"] as const, DEFAULT_PREFERENCES.homeRegion),
+    showTape: bool(prefsRaw["showTape"], DEFAULT_PREFERENCES.showTape),
+    flashTicks: bool(prefsRaw["flashTicks"], DEFAULT_PREFERENCES.flashTicks),
+    riskFreeRate: clampNum(prefsRaw["riskFreeRate"], 0, 25, DEFAULT_PREFERENCES.riskFreeRate),
+    backtestCostBps: clampNum(prefsRaw["backtestCostBps"], 0, 100, DEFAULT_PREFERENCES.backtestCostBps),
+    desktopNotifications: bool(prefsRaw["desktopNotifications"], DEFAULT_PREFERENCES.desktopNotifications),
   };
 
   const recentlyViewed = Array.isArray(r["recentlyViewed"])

@@ -33,6 +33,9 @@ export interface PriceAlert {
   note?: string;
 }
 
+export type ThemePreference = "dark" | "light" | "system";
+export type Density = "comfortable" | "compact";
+
 export interface Preferences {
   /** Currency the portfolio is totalled in. */
   baseCurrency: Currency;
@@ -43,6 +46,23 @@ export interface Preferences {
   indicators: string[];
   /** Dim the interface's motion without touching the OS setting. */
   reducedMotion: boolean;
+
+  /** Synced across devices; localStorage holds a copy for the no-flash boot. */
+  theme: ThemePreference;
+  /** Row heights and gutters throughout. */
+  density: Density;
+  /** Which market the terminal opens on. */
+  homeRegion: "IN" | "US" | "GLOBAL";
+  /** The scrolling price tape along the bottom. */
+  showTape: boolean;
+  /** Flash cells green/red as prices tick. */
+  flashTicks: boolean;
+  /** Annual rate used by Sharpe, Sortino and the backtester, as a percentage. */
+  riskFreeRate: number;
+  /** Per-side trading cost assumed by the backtester, in basis points. */
+  backtestCostBps: number;
+  /** Ask the browser to raise a notification when an alert fires. */
+  desktopNotifications: boolean;
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -51,6 +71,14 @@ export const DEFAULT_PREFERENCES: Preferences = {
   chartStyle: "area",
   indicators: ["ema20", "ema50"],
   reducedMotion: false,
+  theme: "dark",
+  density: "comfortable",
+  homeRegion: "IN",
+  showTape: true,
+  flashTicks: true,
+  riskFreeRate: 6.5,
+  backtestCostBps: 5,
+  desktopNotifications: false,
 };
 
 /** A research note pinned to an instrument. */

@@ -11,7 +11,6 @@ import { SectorRotation } from "@/components/market/SectorRotation";
 import { SessionDial } from "@/components/market/SessionDial";
 import { QuoteTable } from "@/components/market/QuoteTable";
 import { DataSourceNotice } from "@/components/market/DataSourceNotice";
-import { ProviderAttribution } from "@/components/market/ProviderAttribution";
 import { Badge, Panel, PanelHeader, Segmented } from "@/components/ui/primitives";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { instrumentsByRegion } from "@/lib/market/universe";
@@ -141,7 +140,6 @@ export function MarketsView({
           </Panel>
         )}
 
-        <ProviderAttribution />
       </PageBody>
     </>
   );

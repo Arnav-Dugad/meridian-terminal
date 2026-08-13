@@ -14,6 +14,28 @@ import { formatCompactMoney, formatDate, formatPercent, formatPrice } from "@/li
 import { Badge, EmptyState, Panel, PanelHeader, Skeleton, Tooltip } from "@/components/ui/primitives";
 import { findBySymbol } from "@/lib/market/universe";
 import { cn } from "@/lib/utils";
+import { chartPalette } from "@/lib/theme";
+import { useThemeVersion } from "@/lib/hooks/theme-context";
+
+/** Blend two colours in sRGB. Enough for a five-stop ramp. */
+function mix(a: string, b: string, t: number): string {
+  const parse = (c: string): [number, number, number] => {
+    const hex = c.trim().replace("#", "");
+    if (hex.length === 6) {
+      return [
+        parseInt(hex.slice(0, 2), 16),
+        parseInt(hex.slice(2, 4), 16),
+        parseInt(hex.slice(4, 6), 16),
+      ];
+    }
+    const m = c.match(/(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : [128, 128, 128];
+  };
+  const [r1, g1, b1] = parse(a);
+  const [r2, g2, b2] = parse(b);
+  const ch = (x: number, y: number) => Math.round(x + (y - x) * t);
+  return `rgb(${ch(r1, r2)}, ${ch(g1, g2)}, ${ch(b1, b2)})`;
+}
 
 /**
  * The research column: fundamentals, analyst consensus, earnings history and
@@ -214,6 +236,9 @@ export function AnalystPanel({
     [consensus],
   );
 
+  useThemeVersion();
+  const palette = chartPalette();
+
   if (loading) {
     return (
       <Panel flush>
@@ -239,12 +264,14 @@ export function AnalystPanel({
     );
   }
 
+  // A five-stop diverging ramp anchored on the theme's own up/down tokens, so
+  // the distribution stays legible on paper as well as on ink.
   const buckets = [
-    { label: "Strong buy", count: consensus.strongBuy, color: "#2f9e63" },
-    { label: "Buy", count: consensus.buy, color: "#3fbf7f" },
-    { label: "Hold", count: consensus.hold, color: "#8f9bb3" },
-    { label: "Sell", count: consensus.sell, color: "#f0894f" },
-    { label: "Strong sell", count: consensus.strongSell, color: "#f0563f" },
+    { label: "Strong buy", count: consensus.strongBuy, color: palette.up },
+    { label: "Buy", count: consensus.buy, color: mix(palette.up, palette.textDim, 0.35) },
+    { label: "Hold", count: consensus.hold, color: palette.textDim },
+    { label: "Sell", count: consensus.sell, color: mix(palette.down, palette.textDim, 0.35) },
+    { label: "Strong sell", count: consensus.strongSell, color: palette.down },
   ];
 
   const upside =

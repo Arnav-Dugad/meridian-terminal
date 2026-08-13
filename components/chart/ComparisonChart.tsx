@@ -6,6 +6,8 @@ import { motion } from "motion/react";
 import type { Candle } from "@/lib/twelvedata/types";
 import { normalise } from "@/lib/analytics/indicators";
 import { cn } from "@/lib/utils";
+import { chartPalette } from "@/lib/theme";
+import { useThemeVersion } from "@/lib/hooks/theme-context";
 
 /**
  * Rebased performance overlay.
@@ -43,6 +45,11 @@ export function ComparisonChart({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [hover, setHover] = useState<{ ratio: number; x: number } | null>(null);
   const [width, setWidth] = useState(880);
+
+  // SVG paint attributes take colour strings, not CSS variables, so the
+  // palette is read in JS and re-read whenever the theme changes.
+  useThemeVersion();
+  const palette = chartPalette();
 
   // Resample everything onto a common index count so the lines share an
   // x-axis even when the provider returns different bar counts per symbol.
@@ -152,8 +159,8 @@ export function ComparisonChart({
       >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#f4f2ec" stopOpacity={0.05} />
-            <stop offset="100%" stopColor="#f4f2ec" stopOpacity={0} />
+            <stop offset="0%" stopColor={palette.text} stopOpacity={0.05} />
+            <stop offset="100%" stopColor={palette.text} stopOpacity={0} />
           </linearGradient>
         </defs>
 
@@ -165,13 +172,13 @@ export function ComparisonChart({
               x2={PAD.left + plotW}
               y1={y(t)}
               y2={y(t)}
-              stroke="rgba(244,242,236,0.055)"
+              stroke={palette.grid}
               strokeWidth={1}
             />
             <text
               x={PAD.left + plotW + 8}
               y={y(t)}
-              fill="#6a6862"
+              fill={palette.textDim}
               fontSize={10}
               fontFamily="var(--font-plex-mono), monospace"
               dominantBaseline="middle"
@@ -187,7 +194,7 @@ export function ComparisonChart({
           x2={PAD.left + plotW}
           y1={y(100)}
           y2={y(100)}
-          stroke="rgba(244,242,236,0.24)"
+          stroke={palette.axis}
           strokeWidth={1}
           strokeDasharray="3 4"
         />
@@ -213,7 +220,7 @@ export function ComparisonChart({
                 cy={y(line.values[line.values.length - 1] ?? 100)}
                 r={3}
                 fill={line.color}
-                stroke="#0b0b0d"
+                stroke={palette.surface}
                 strokeWidth={1.4}
               />
             </g>
@@ -227,7 +234,7 @@ export function ComparisonChart({
               x2={x(hoverIndex)}
               y1={PAD.top}
               y2={PAD.top + plotH}
-              stroke="rgba(244,242,236,0.3)"
+              stroke={palette.crosshair}
               strokeWidth={1}
               strokeDasharray="2 3"
             />
@@ -237,7 +244,7 @@ export function ComparisonChart({
                 cx={x(hoverIndex)}
                 cy={y(line.values[hoverIndex] ?? 100)}
                 r={3.2}
-                fill="#0b0b0d"
+                fill={palette.surface}
                 stroke={line.color}
                 strokeWidth={1.8}
               />

@@ -10,9 +10,9 @@ import { Button } from "@/components/ui/primitives";
 import { Wordmark } from "@/components/brand/Wordmark";
 
 const LINKS = [
-  { href: "#thesis", label: "The thesis" },
-  { href: "#terminal", label: "Terminal" },
-  { href: "#engineering", label: "Engineering" },
+  { href: "#thesis", label: "Why" },
+  { href: "#terminal", label: "Features" },
+  { href: "#india", label: "For India" },
 ];
 
 export function LandingNav() {

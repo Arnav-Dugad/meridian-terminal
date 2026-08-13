@@ -12,6 +12,24 @@
    a theme switch, and committing to one palette lets the data carry the color.
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   A NOTE ON THE TOKEN NAMES
+
+   `ink-*` and `ivory-*` describe *depth*, not literal colour.
+
+   `ink` is the surface stack: 1000 is the deepest recess (rails, footers), 950
+   the page, 900 a panel sitting on it, and the numbers below that are
+   progressively more raised — hovers, inputs, chips, tracks. `ivory` is the
+   foreground stack, from primary text down to the faintest caption.
+
+   In dark mode ink resolves to near-black and ivory to warm white. In light
+   mode both invert while keeping their *relationships* intact: a panel is
+   still one step raised from the page, a caption still one step quieter than
+   body text. Because every component addresses depth rather than colour, the
+   entire interface flips by swapping the values below — no component knows a
+   theme exists.
+   ───────────────────────────────────────────────────────────────────────── */
+
 @theme {
   /* ── Ground ─────────────────────────────────────────────────────────────
      Warm-shifted blacks. Pure #000 reads cheap on OLED and crushes the
@@ -89,6 +107,67 @@
   --animate-scan: scan 7s linear infinite;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   LIGHT THEME
+
+   Every token below is the same *role* as its dark counterpart, re-valued for
+   paper. Three things get deliberate attention rather than a naive inversion:
+
+   1. The page is warm off-white and panels are pure white, so a panel still
+      reads as raised. Inverting literally — white page, grey panels — makes
+      every surface look sunken.
+   2. Market colours are darkened. #3fbf7f is legible on black and washes out
+      on white; contrast against the background matters more than matching the
+      dark palette.
+   3. Hairlines flip from light-on-dark to dark-on-light at slightly higher
+      alpha, because dark rules on white read thinner than light rules on
+      black at the same opacity.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Surfaces, deepest recess to most raised. */
+  --color-ink-1000: #ebe7e0;
+  --color-ink-950: #f5f2ec;
+  --color-ink-900: #ffffff;
+  --color-ink-850: #faf8f4;
+  --color-ink-800: #f1eee7;
+  --color-ink-750: #e9e5dc;
+  --color-ink-700: #ddd8cd;
+  --color-ink-600: #c9c3b6;
+  --color-ink-500: #aca596;
+
+  /* Foreground, primary to faintest. */
+  --color-ivory: #191820;
+  --color-ivory-80: #3b3947;
+  --color-ivory-60: #66636f;
+  --color-ivory-40: #8b8794;
+  --color-ivory-25: rgba(25, 24, 32, 0.3);
+
+  --color-line: rgba(25, 24, 32, 0.1);
+  --color-line-strong: rgba(25, 24, 32, 0.17);
+  --color-line-bright: rgba(25, 24, 32, 0.3);
+
+  /* Darkened for contrast against white. */
+  --color-up: #12874c;
+  --color-up-dim: #a9dcc0;
+  --color-up-glow: rgba(18, 135, 76, 0.13);
+  --color-down: #cf3520;
+  --color-down-dim: #f3bfb6;
+  --color-down-glow: rgba(207, 53, 32, 0.13);
+  --color-flat: #7c7a74;
+
+  --color-signal: #a8680a;
+  --color-signal-soft: #c98a1f;
+  --color-signal-deep: #f0dcb8;
+  --color-india: #a8680a;
+  --color-usa: #2a56a8;
+  --color-usa-deep: #cfdcf5;
+  --color-crypto: #0b7d74;
+  --color-crypto-deep: #bfe6e2;
+}
+
 @keyframes marquee {
   from { transform: translate3d(0, 0, 0); }
   to { transform: translate3d(-50%, 0, 0); }
@@ -125,7 +204,8 @@
     border-color: var(--color-line);
   }
 
-  :root {
+  :root,
+  :root[data-theme="dark"] {
     color-scheme: dark;
     /* Optical sizing + tabular figures are the single highest-leverage
        typographic choice in a numbers product: columns stop dancing. */
@@ -301,6 +381,19 @@
       linear-gradient(to bottom, oklch(from #f4f2ec l c h / 0.035) 1px, transparent 1px);
     background-size: 24px 24px;
   }
+  :root[data-theme="light"] .grid-rule-fine {
+    background-image:
+      linear-gradient(to right, rgba(25, 24, 32, 0.045) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(25, 24, 32, 0.045) 1px, transparent 1px);
+  }
+
+  /* Grain is a dark-surface device: on paper the same overlay reads as dirt,
+     so it is dialled right down and switched to a multiply-free blend. */
+  :root[data-theme="light"] .grain-fixed::after,
+  :root[data-theme="light"] .grain::after {
+    opacity: 0.014;
+    mix-blend-mode: multiply;
+  }
 
   /* Panel: flush surface + hairline. No drop shadow — shadows on black are
      mud, and institutional software separates with rules, not elevation. */
@@ -317,9 +410,16 @@
   }
 
   /* Inner top highlight — one pixel of light on the leading edge reads as a
-     bevel and is the cheapest way to make a dark surface feel physical. */
+     bevel and is the cheapest way to make a dark surface feel physical.
+     On paper the same trick is inverted: a panel earns its lift from a soft
+     drop shadow, because a white highlight on white is invisible. */
   .bevel {
     box-shadow: inset 0 1px 0 0 oklch(from #f4f2ec l c h / 0.055);
+  }
+  :root[data-theme="light"] .bevel {
+    box-shadow:
+      0 1px 2px rgba(25, 24, 32, 0.04),
+      0 1px 1px rgba(25, 24, 32, 0.03);
   }
 
   .text-balance { text-wrap: balance; }
@@ -432,4 +532,38 @@
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* The in-app switch, for people who want calm here without changing the OS. */
+:root[data-reduce-motion] *,
+:root[data-reduce-motion] *::before,
+:root[data-reduce-motion] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Density
+
+   Compact tightens the vertical rhythm of dense surfaces only — tables, list
+   rows, panel padding. Type sizes and touch targets are left alone, because
+   shrinking those trades legibility for rows nobody asked for.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root[data-density="compact"] {
+  --density-row-y: 0.3rem;
+  --density-panel-p: 0.7rem;
+}
+
+:root[data-density="compact"] table td,
+:root[data-density="compact"] table th {
+  padding-top: var(--density-row-y);
+  padding-bottom: var(--density-row-y);
+}
+
+:root[data-density="compact"] .panel > .p-4,
+:root[data-density="compact"] .panel > .p-5 {
+  padding: var(--density-panel-p);
 }
