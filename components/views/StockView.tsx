@@ -13,6 +13,7 @@ import { InstrumentNotes } from "@/components/market/InstrumentNotes";
 import { BacktestPanel } from "@/components/market/BacktestPanel";
 import { OptionsPanel } from "@/components/market/OptionsPanel";
 import { DriftPanel } from "@/components/market/DriftPanel";
+import { SeasonalityPanel } from "@/components/market/SeasonalityPanel";
 import {
   AnalystPanel,
   EarningsPanel,
@@ -523,6 +524,10 @@ export function StockView({
                 : 252
           }
         />
+
+        {/* Seasonality is free — it runs on the bars already loaded. It only
+            says anything on a long range, and tells you so otherwise. */}
+        <SeasonalityPanel candles={candles} symbol={quote.symbol} />
 
         {/* Options exist for US listings on the free data tiers. */}
         {instrument?.region === "US" && <OptionsPanel slug={slug} currency={currency} />}

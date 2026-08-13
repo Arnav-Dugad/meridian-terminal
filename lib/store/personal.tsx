@@ -18,6 +18,8 @@ import { uid as makeId } from "@/lib/utils";
 import { DEFAULT_PREFERENCES, EMPTY_PERSONAL, LIMITS } from "@/lib/store/types";
 import type {
   AlertKind,
+  FlowAlert,
+  FlowAlertKind,
   InstrumentNote,
   PersonalState,
   PortfolioSnapshot,
@@ -93,6 +95,11 @@ interface PersonalContextValue extends PersonalState {
 
   saveWorkspace: (name: string, panes: WorkspacePane[], id?: string) => string;
   removeWorkspace: (id: string) => void;
+
+  addFlowAlert: (kind: FlowAlertKind, threshold: number, note?: string) => void;
+  removeFlowAlert: (id: string) => void;
+  markFlowAlertTriggered: (id: string, date: string) => void;
+  rearmFlowAlert: (id: string) => void;
 }
 
 const PersonalContext = createContext<PersonalContextValue | null>(null);
@@ -186,6 +193,13 @@ function coerceState(raw: unknown): PersonalState {
         .sort((a, b) => a.date.localeCompare(b.date))
     : [];
 
+  const flowAlerts = Array.isArray(r["flowAlerts"])
+    ? (r["flowAlerts"] as unknown[]).flatMap((a) => {
+        const alert = coerceFlowAlert(a);
+        return alert ? [alert] : [];
+      })
+    : [];
+
   const workspaces = Array.isArray(r["workspaces"])
     ? (r["workspaces"] as unknown[]).flatMap((w) => {
         const ws = coerceWorkspace(w);
@@ -203,6 +217,40 @@ function coerceState(raw: unknown): PersonalState {
     savedScreens,
     snapshots,
     workspaces,
+    flowAlerts,
+  };
+}
+
+const FLOW_KINDS: FlowAlertKind[] = [
+  "fii-buy-above",
+  "fii-sell-above",
+  "dii-buy-above",
+  "dii-sell-above",
+  "combined-buy-above",
+  "combined-sell-above",
+];
+
+function coerceFlowAlert(a: unknown): FlowAlert | null {
+  if (typeof a !== "object" || a === null) return null;
+  const r = a as Record<string, unknown>;
+  const kind = r["kind"];
+  const threshold = Number(r["threshold"]);
+  if (typeof kind !== "string" || !FLOW_KINDS.includes(kind as FlowAlertKind)) return null;
+  if (!Number.isFinite(threshold) || threshold <= 0) return null;
+
+  return {
+    id: typeof r["id"] === "string" ? r["id"] : makeId("flow"),
+    kind: kind as FlowAlertKind,
+    threshold,
+    active: r["active"] !== false,
+    createdAt: Number(r["createdAt"]) || Date.now(),
+    ...(Number.isFinite(Number(r["triggeredAt"])) && Number(r["triggeredAt"]) > 0
+      ? { triggeredAt: Number(r["triggeredAt"]) }
+      : {}),
+    ...(typeof r["triggeredForDate"] === "string"
+      ? { triggeredForDate: r["triggeredForDate"] }
+      : {}),
+    ...(typeof r["note"] === "string" ? { note: r["note"] } : {}),
   };
 }
 
@@ -718,6 +766,58 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
     [mutate],
   );
 
+  /* ── Flow alerts ────────────────────────────────────────────────────────
+     Keyed by session date on trigger, so a threshold that fires today can
+     re-arm tomorrow rather than being spent permanently. */
+
+  const addFlowAlert = useCallback<PersonalContextValue["addFlowAlert"]>(
+    (kind, threshold, note) => {
+      if (!Number.isFinite(threshold) || threshold <= 0) return;
+      const alert: FlowAlert = {
+        id: makeId("flow"),
+        kind,
+        threshold,
+        active: true,
+        createdAt: Date.now(),
+        ...(note ? { note } : {}),
+      };
+      mutate((p) => ({
+        ...p,
+        flowAlerts: [alert, ...p.flowAlerts].slice(0, LIMITS.flowAlerts),
+      }));
+    },
+    [mutate],
+  );
+
+  const removeFlowAlert = useCallback(
+    (id: string) => mutate((p) => ({ ...p, flowAlerts: p.flowAlerts.filter((a) => a.id !== id) })),
+    [mutate],
+  );
+
+  const markFlowAlertTriggered = useCallback(
+    (id: string, date: string) =>
+      mutate((p) => ({
+        ...p,
+        flowAlerts: p.flowAlerts.map((a) =>
+          a.id === id ? { ...a, triggeredAt: Date.now(), triggeredForDate: date } : a,
+        ),
+      })),
+    [mutate],
+  );
+
+  const rearmFlowAlert = useCallback(
+    (id: string) =>
+      mutate((p) => ({
+        ...p,
+        flowAlerts: p.flowAlerts.map((a) =>
+          a.id === id
+            ? { ...a, active: true, triggeredAt: undefined, triggeredForDate: undefined }
+            : a,
+        ),
+      })),
+    [mutate],
+  );
+
   const value = useMemo<PersonalContextValue>(
     () => ({
       ...state,
@@ -747,12 +847,17 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
       recordSnapshot,
       saveWorkspace,
       removeWorkspace,
+      addFlowAlert,
+      removeFlowAlert,
+      markFlowAlertTriggered,
+      rearmFlowAlert,
     }),
     [
       state, ready, mode, migrated, isWatched, toggleWatch, addToWatchlist, removeFromWatchlist,
       reorderWatchlist, addPosition, updatePosition, removePosition, addAlert, updateAlert,
       removeAlert, markAlertTriggered, setPreference, resetAll, recordView, noteFor, saveNote,
       removeNote, saveScreen, removeScreen, recordSnapshot, saveWorkspace, removeWorkspace,
+      addFlowAlert, removeFlowAlert, markFlowAlertTriggered, rearmFlowAlert,
     ],
   );
 
@@ -801,6 +906,7 @@ function mergeState(remote: PersonalState, local: PersonalState): PersonalState 
       .sort((a, b) => a.date.localeCompare(b.date))
       .slice(-LIMITS.snapshots),
     workspaces: [...remote.workspaces, ...local.workspaces].slice(0, LIMITS.workspaces),
+    flowAlerts: [...remote.flowAlerts, ...local.flowAlerts].slice(0, LIMITS.flowAlerts),
   };
 }
 

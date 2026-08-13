@@ -39,7 +39,8 @@ service cloud.firestore {
           && (!('notes' in d)          || d.notes.size()          <= 200)
           && (!('savedScreens' in d)   || d.savedScreens.size()   <= 30)
           && (!('snapshots' in d)      || d.snapshots.size()      <= 800)
-          && (!('workspaces' in d)     || d.workspaces.size()     <= 12);
+          && (!('workspaces' in d)     || d.workspaces.size()     <= 12)
+          && (!('flowAlerts' in d)     || d.flowAlerts.size()     <= 20);
     }
 
     function hasExpectedTypes() {
@@ -52,6 +53,7 @@ service cloud.firestore {
           && (!('savedScreens' in d)   || d.savedScreens is list)
           && (!('snapshots' in d)      || d.snapshots is list)
           && (!('workspaces' in d)     || d.workspaces is list)
+          && (!('flowAlerts' in d)     || d.flowAlerts is list)
           && (!('preferences' in d)    || d.preferences is map);
     }
 

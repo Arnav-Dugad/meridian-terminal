@@ -30,6 +30,7 @@ import {
   IconScale,
   IconSearch,
   IconSettings,
+  IconSpark,
   IconStar,
 } from "@/components/ui/icons";
 import { Badge } from "@/components/ui/primitives";
@@ -77,6 +78,8 @@ const NAV_COMMANDS: NavCommand[] = [
   { id: "portfolio", label: "Portfolio", hint: "Holdings, P&L and risk", href: "/portfolio", icon: <IconBriefcase />, keywords: "holdings positions pnl profit returns" },
   { id: "workspace", label: "Workspace", hint: "Four charts on one screen, saved as layouts", href: "/workspace", icon: <IconLayers />, keywords: "layout panes multi split grid charts" },
   { id: "flows", label: "Institutional flows", hint: "What foreign and domestic money did today", href: "/flows", icon: <IconScale />, keywords: "fii dii foreign domestic institutions india buying selling" },
+  { id: "deals", label: "Bulk & block deals", hint: "Which institution bought what, by name", href: "/deals", icon: <IconLayers />, keywords: "bulk block large trades institutions india fund stake" },
+  { id: "actions", label: "Corporate actions", hint: "Dividends, splits and bonuses", href: "/actions", icon: <IconSpark />, keywords: "dividend split bonus buyback rights ex-date record" },
   { id: "earnings", label: "Earnings calendar", hint: "Who reports, and when", href: "/earnings", icon: <IconClock />, keywords: "results quarterly report calendar eps" },
   { id: "alerts", label: "Alerts", hint: "Price triggers", href: "/alerts", icon: <IconBell />, keywords: "notifications triggers price" },
   { id: "settings", label: "Settings", hint: "Theme, currency, charts and your data", href: "/settings", icon: <IconSettings />, keywords: "preferences theme light dark mode account export" },

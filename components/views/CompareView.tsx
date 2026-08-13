@@ -1,10 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
 
 import { PageBody, PageHeader } from "@/components/shell/PageHeader";
 import { ComparisonChart, type ComparisonSeries } from "@/components/chart/ComparisonChart";
+import {
+  CorrelationNetwork,
+  type NetworkEdge,
+  type NetworkNode,
+} from "@/components/chart/CorrelationNetwork";
 import { Badge, Button, EmptyState, Input, Panel, PanelHeader, Segmented, Tooltip } from "@/components/ui/primitives";
 import { IconClose, IconPlus, IconScale, IconSearch } from "@/components/ui/icons";
 import { useMultiSeries } from "@/lib/hooks/use-series";
@@ -37,6 +43,8 @@ export function CompareView() {
   const [selected, setSelected] = useState<string[]>(DEFAULT_SELECTION);
   const [range, setRange] = useState<RangeKey>("1Y");
   const [query, setQuery] = useState("");
+  const [networkThreshold, setNetworkThreshold] = useState(0.4);
+  const router = useRouter();
 
   const { series, loading } = useMultiSeries(selected, range);
 
@@ -87,6 +95,38 @@ export function CompareView() {
   const matrix = useMemo(() => {
     return stats.map((a) => stats.map((b) => (a.slug === b.slug ? 1 : correlation(a.returns, b.returns))));
   }, [stats]);
+
+  /* ── Network view ────────────────────────────────────────────────────────
+     The same correlations, laid out as a graph. Nodes carry region and weight
+     so the simulation can colour and size them without another lookup. */
+  const networkNodes = useMemo<NetworkNode[]>(
+    () =>
+      stats.map((s) => {
+        const inst = findBySlug(s.slug);
+        return {
+          id: s.slug,
+          label: s.label,
+          weight: inst?.seedCap ?? 1,
+          region: (inst?.region ?? "US") as NetworkNode["region"],
+          changePercent: s.totalReturn,
+        };
+      }),
+    [stats],
+  );
+
+  const networkEdges = useMemo<NetworkEdge[]>(() => {
+    const out: NetworkEdge[] = [];
+    for (let i = 0; i < stats.length; i++) {
+      for (let j = i + 1; j < stats.length; j++) {
+        out.push({
+          source: stats[i]!.slug,
+          target: stats[j]!.slug,
+          correlation: matrix[i]?.[j] ?? 0,
+        });
+      }
+    }
+    return out;
+  }, [stats, matrix]);
 
   const suggestions = useMemo(
     () => (query.trim() ? searchUniverse(query, 6).filter((i) => !selected.includes(i.slug)) : []),
@@ -234,6 +274,47 @@ export function CompareView() {
             )}
           </div>
         </Panel>
+
+        {/* Network view — the matrix says how much each pair moves together;
+            the graph shows the shape that emerges from all of them at once. */}
+        {stats.length > 2 && (
+          <Panel flush>
+            <PanelHeader
+              title="Correlation map"
+              subtitle="Connected instruments move together — the closer they sit, the tighter the link"
+              action={
+                <div className="flex items-center gap-2">
+                  <span className="label-micro text-ivory-40">
+                    ≥ {networkThreshold.toFixed(2)}
+                  </span>
+                  <input
+                    type="range"
+                    min={0.1}
+                    max={0.9}
+                    step={0.05}
+                    value={networkThreshold}
+                    onChange={(e) => setNetworkThreshold(Number(e.target.value))}
+                    className="h-1 w-[110px] cursor-pointer appearance-none rounded-full bg-ink-700 accent-signal"
+                    aria-label="Correlation threshold"
+                  />
+                </div>
+              }
+            />
+            <CorrelationNetwork
+              nodes={networkNodes}
+              edges={networkEdges}
+              threshold={networkThreshold}
+              height={440}
+              onSelect={(id) => router.push(`/stock/${encodeURIComponent(id)}`)}
+            />
+            <p className="border-t border-line px-4 py-3 text-[11px] leading-relaxed text-ivory-40">
+              Solid lines are positive correlation, dashed red lines negative. Node size is
+              relative weight. Drag the threshold to strip out weak relationships — what
+              survives above 0.6 is genuine structure, and anything that sits between the
+              two regional clusters is a name that bridges both markets.
+            </p>
+          </Panel>
+        )}
 
         <div className="grid gap-5 lg:grid-cols-[1fr_auto]">
           {/* Risk table */}

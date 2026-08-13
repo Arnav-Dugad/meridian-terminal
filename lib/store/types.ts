@@ -16,6 +16,34 @@ export interface Position {
 
 export type AlertKind = "above" | "below" | "pct-gain" | "pct-loss";
 
+/**
+ * Flow alerts watch the Indian institutional tape rather than a price.
+ *
+ * These are separate from price alerts because they have no instrument — the
+ * subject is the market's foreign or domestic institutional activity as a
+ * whole, published once per session. Nothing else consumer-facing offers this.
+ */
+export type FlowAlertKind =
+  | "fii-buy-above"
+  | "fii-sell-above"
+  | "dii-buy-above"
+  | "dii-sell-above"
+  | "combined-buy-above"
+  | "combined-sell-above";
+
+export interface FlowAlert {
+  id: string;
+  kind: FlowAlertKind;
+  /** Threshold in crore rupees, always positive. */
+  threshold: number;
+  active: boolean;
+  createdAt: number;
+  triggeredAt?: number;
+  /** The date of the session that tripped it, so it can re-arm the next day. */
+  triggeredForDate?: string;
+  note?: string;
+}
+
 export interface PriceAlert {
   id: string;
   slug: string;
@@ -155,6 +183,7 @@ export interface PersonalState {
   savedScreens: SavedScreen[];
   snapshots: PortfolioSnapshot[];
   workspaces: Workspace[];
+  flowAlerts: FlowAlert[];
 }
 
 export const EMPTY_PERSONAL: PersonalState = {
@@ -167,6 +196,7 @@ export const EMPTY_PERSONAL: PersonalState = {
   savedScreens: [],
   snapshots: [],
   workspaces: [],
+  flowAlerts: [],
 };
 
 /** Caps, enforced on write so a document cannot grow without bound. */
@@ -179,6 +209,7 @@ export const LIMITS = {
   workspaces: 12,
   /** Panes per workspace — the grid is 2×2. */
   panes: 4,
+  flowAlerts: 20,
 } as const;
 
 /** Where the current personal data is being persisted. */

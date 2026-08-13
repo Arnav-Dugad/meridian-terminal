@@ -6,6 +6,7 @@ import { motion } from "motion/react";
 import { PageBody, PageHeader } from "@/components/shell/PageHeader";
 import { Badge, Button, EmptyState, Panel, PanelHeader, Skeleton, Segmented } from "@/components/ui/primitives";
 import { IconRefresh, IconScale } from "@/components/ui/icons";
+import { FlowAlertsPanel } from "@/components/market/FlowAlerts";
 import { chartPalette } from "@/lib/theme";
 import { useThemeVersion } from "@/lib/hooks/theme-context";
 import { formatDate, formatRelative } from "@/lib/format";
@@ -202,6 +203,8 @@ export function FlowsView() {
                 </div>
               )}
             </Panel>
+
+            <FlowAlertsPanel latest={latest} />
 
             <Panel>
               <p className="text-[12px] leading-relaxed text-ivory-60">

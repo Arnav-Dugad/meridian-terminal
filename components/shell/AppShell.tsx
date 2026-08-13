@@ -32,6 +32,7 @@ import {
   IconScale,
   IconSearch,
   IconSettings,
+  IconSpark,
   IconStar,
   IconUser,
 } from "@/components/ui/icons";
@@ -57,6 +58,8 @@ const NAV = [
   { href: "/screener", label: "Screener", icon: <IconFilter /> },
   { href: "/compare", label: "Compare", icon: <IconScale /> },
   { href: "/flows", label: "Flows", icon: <IconActivity /> },
+  { href: "/deals", label: "Big trades", icon: <IconLayers /> },
+  { href: "/actions", label: "Actions", icon: <IconSpark /> },
   { href: "/earnings", label: "Earnings", icon: <IconClock /> },
   { href: "/news", label: "Newsroom", icon: <IconNews /> },
   { href: "/watchlist", label: "Watchlist", icon: <IconStar /> },
