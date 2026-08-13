@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
 import { runProviderProbes } from "@/lib/providers/probe";
+import { resetBreaker } from "@/lib/providers/breaker";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +20,11 @@ export const maxDuration = 60;
  * flag rather than making a request would have reported FMP as healthy for the
  * entire period its v3 endpoints were returning "Legacy Endpoint" errors.
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // A manual run should test the provider, not the memory of its last failure,
+  // so probing clears the breakers first.
+  if (req.nextUrl.searchParams.get("reset") !== "0") resetBreaker();
+
   const results = await runProviderProbes();
 
   const healthy = results.filter((r) => r.status === "ok").length;
@@ -33,10 +38,10 @@ export async function GET() {
         total: results.length,
         verdict:
           healthy === 0
-            ? "No provider is answering — the terminal is running fully simulated."
+            ? "No data source is answering. Prices cannot be shown until one recovers."
             : healthy < configured
-              ? "Some providers are failing; affected instruments fall back to cache or simulation."
-              : "All configured providers are answering.",
+              ? "Some sources are failing. Anything they alone covered will show as unavailable rather than estimated."
+              : "All configured sources are answering.",
       },
       results,
       asOf: new Date().toISOString(),

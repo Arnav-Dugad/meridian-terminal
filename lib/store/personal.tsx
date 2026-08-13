@@ -228,6 +228,8 @@ const FLOW_KINDS: FlowAlertKind[] = [
   "dii-sell-above",
   "combined-buy-above",
   "combined-sell-above",
+  "deal-buy-above",
+  "deal-sell-above",
 ];
 
 function coerceFlowAlert(a: unknown): FlowAlert | null {

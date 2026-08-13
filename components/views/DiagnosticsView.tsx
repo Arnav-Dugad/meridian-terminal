@@ -198,7 +198,11 @@ export function DiagnosticsView() {
               def="No key configured. Add the named environment variable in Vercel and redeploy."
             />
             <Row
-              term="Why India can still read Simulated"
+              term="Nothing is ever invented"
+              def="When no source can answer, the terminal shows an empty panel and the reason. It never fills a gap with a generated figure — a plausible wrong number is indistinguishable from a right one."
+            />
+            <Row
+              term="Where Indian data comes from"
               def="Twelve Data's free tier returns a plan error for NSE and BSE. Yahoo Finance covers them instead and needs no key — so if Yahoo is green, Indian prices are real."
             />
           </dl>

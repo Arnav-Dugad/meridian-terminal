@@ -322,6 +322,54 @@ export const finnhub: QuoteProvider = {
     return points.sort((a, b) => (b.reportedAt ?? 0) - (a.reportedAt ?? 0)).slice(0, 8);
   },
 
+  /**
+   * Insider transactions.
+   *
+   * Filed with the SEC and republished here. The signal worth extracting is
+   * net direction over recent months rather than any single filing — a chief
+   * executive selling on a schedule is noise, several officers buying in the
+   * same quarter is not.
+   */
+  async fetchInsiderTransactions(inst: Instrument): Promise<InsiderTrade[]> {
+    const raw = await providerFetch<{ data?: unknown[] }>(
+      url("/stock/insider-transactions", { symbol: inst.symbol }),
+      { provider: ID, maxWaitMs: 700 },
+    );
+    if (!Array.isArray(raw.data)) return [];
+
+    const trades: InsiderTrade[] = [];
+    for (const row of raw.data) {
+      if (!row || typeof row !== "object") continue;
+      const r = row as Record<string, unknown>;
+
+      const name = str(r["name"]);
+      const change = num(r["change"]);
+      const filed = str(r["filingDate"]);
+      if (!name || change == null || change === 0 || !filed) continue;
+
+      const price = num(r["transactionPrice"]);
+      const code = str(r["transactionCode"]);
+
+      trades.push({
+        name,
+        shares: Math.abs(change),
+        // A gift or an award is a transfer, not a purchase, and lumping it in
+        // with open-market buying is how insider data gets misread.
+        direction: change > 0 ? "buy" : "sell",
+        openMarket: code === "P" || code === "S",
+        code,
+        price: price != null && price > 0 ? price : null,
+        value: price != null && price > 0 ? Math.abs(change) * price : null,
+        filedAt: Date.parse(filed) || null,
+        transactedAt: str(r["transactionDate"]) ? Date.parse(str(r["transactionDate"])!) || null : null,
+      });
+    }
+
+    return trades
+      .sort((a, b) => (b.transactedAt ?? b.filedAt ?? 0) - (a.transactedAt ?? a.filedAt ?? 0))
+      .slice(0, 40);
+  },
+
   async fetchPeers(inst: Instrument): Promise<string[]> {
     const raw = await providerFetch<unknown>(url("/stock/peers", { symbol: inst.symbol }), {
       provider: ID,
@@ -334,6 +382,70 @@ export const finnhub: QuoteProvider = {
       .slice(0, 8);
   },
 };
+
+/* ── Insider and IPO types ────────────────────────────────────────────────── */
+
+export interface InsiderTrade {
+  name: string;
+  shares: number;
+  direction: "buy" | "sell";
+  /** True for an open-market purchase or sale, false for grants and gifts. */
+  openMarket: boolean;
+  code: string | null;
+  price: number | null;
+  value: number | null;
+  filedAt: number | null;
+  transactedAt: number | null;
+}
+
+export interface IpoEntry {
+  symbol: string | null;
+  name: string;
+  exchange: string | null;
+  date: string;
+  status: string | null;
+  shares: number | null;
+  priceRange: string | null;
+  totalValue: number | null;
+}
+
+/**
+ * Upcoming and recent listings.
+ *
+ * A calendar of what is about to start trading — the one part of the market
+ * that has no price history to look at, and so is exactly where a calendar
+ * earns its place.
+ */
+export async function fetchIpoCalendar(from: string, to: string): Promise<IpoEntry[]> {
+  const raw = await providerFetch<{ ipoCalendar?: unknown[] }>(
+    url("/calendar/ipo", { from, to }),
+    { provider: ID, maxWaitMs: 1200 },
+  );
+  if (!Array.isArray(raw.ipoCalendar)) return [];
+
+  const out: IpoEntry[] = [];
+  for (const row of raw.ipoCalendar) {
+    if (!row || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+
+    const name = str(r["name"]);
+    const date = str(r["date"]);
+    if (!name || !date) continue;
+
+    out.push({
+      symbol: str(r["symbol"]),
+      name,
+      exchange: str(r["exchange"]),
+      date,
+      status: str(r["status"]),
+      shares: num(r["numberOfShares"]),
+      priceRange: str(r["price"]),
+      totalValue: num(r["totalSharesValue"]),
+    });
+  }
+
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
 

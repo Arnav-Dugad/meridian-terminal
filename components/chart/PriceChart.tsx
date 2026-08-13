@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 
-import { ChartEngine, type ChartHover, type ChartStyle, type OverlaySeries } from "@/components/chart/engine";
+import {
+  ChartEngine,
+  type ChartEvent,
+  type ChartHover,
+  type ChartStyle,
+  type OverlaySeries,
+} from "@/components/chart/engine";
 import type { Candle } from "@/lib/twelvedata/types";
 import type { Currency } from "@/lib/format";
 import { formatCompact, formatPrice, formatPercent } from "@/lib/format";
@@ -39,6 +45,10 @@ interface PriceChartProps {
   loading?: boolean;
   className?: string;
   height?: number;
+  /** Corporate actions marked on the time axis. */
+  events?: ChartEvent[];
+  /** Shown in place of the chart when no history could be retrieved. */
+  unavailableReason?: string | null;
 }
 
 export function PriceChart({
@@ -53,6 +63,8 @@ export function PriceChart({
   loading = false,
   className,
   height = 420,
+  events,
+  unavailableReason = null,
 }: PriceChartProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const engineRef = useRef<ChartEngine | null>(null);
@@ -149,10 +161,11 @@ export function PriceChart({
       overlays,
       levels,
       intraday,
+      events,
       reducedMotion: shouldReduceMotion ?? false,
       formatPrice: (v) => compactAxisPrice(v, currency),
     });
-  }, [style, showVolume, overlays, levels, intraday, shouldReduceMotion, currency]);
+  }, [style, showVolume, overlays, levels, intraday, events, shouldReduceMotion, currency]);
 
   useEffect(() => {
     if (candles.length === 0) return;
@@ -233,9 +246,18 @@ export function PriceChart({
         </div>
       )}
 
+      {/*
+        An explicit, explained gap — never a placeholder curve. A fabricated
+        chart is indistinguishable from a real one at a glance, which is the
+        one failure mode worse than showing nothing.
+      */}
       {!loading && candles.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <p className="label-micro text-ivory-40">No history available</p>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
+          <p className="label-micro text-ivory-60">Price history unavailable</p>
+          <p className="max-w-[46ch] text-[11px] leading-relaxed text-ivory-40">
+            {unavailableReason ??
+              "No data source could return history for this instrument right now. This usually clears within a minute."}
+          </p>
         </div>
       )}
     </div>

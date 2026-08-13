@@ -29,7 +29,10 @@ export type FlowAlertKind =
   | "dii-buy-above"
   | "dii-sell-above"
   | "combined-buy-above"
-  | "combined-sell-above";
+  | "combined-sell-above"
+  /** Any single disclosed bulk or block trade above the threshold. */
+  | "deal-buy-above"
+  | "deal-sell-above";
 
 export interface FlowAlert {
   id: string;

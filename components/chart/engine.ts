@@ -43,10 +43,28 @@ export interface ChartHover {
   y: number;
 }
 
+/**
+ * A dated event drawn on the time axis.
+ *
+ * The reason this exists: a stock going ex-dividend drops by roughly the
+ * dividend on the open, and a split rebases the whole series. Both look
+ * identical to a crash on a bare price chart. Marking them where the drop
+ * happens makes the chart explain itself.
+ */
+export interface ChartEvent {
+  /** Epoch milliseconds. */
+  t: number;
+  /** Single character drawn in the marker — D for dividend, S for split. */
+  glyph: string;
+  label: string;
+  color: string;
+}
+
 export interface ChartOptions {
   style: ChartStyle;
   showVolume: boolean;
   showGrid: boolean;
+  events?: ChartEvent[];
   /** Baseline for the area gradient — the previous close, typically. */
   baseline?: number | null;
   overlays?: OverlaySeries[];
@@ -285,6 +303,7 @@ export class ChartEngine {
     else this.drawArea(data, plot, scale);
 
     this.drawOverlayLines(plot, scale, data.length);
+    this.drawEvents(data, plot);
     this.drawPriceAxis(plot, scale);
     this.drawTimeAxis(data, plot);
     this.drawLastMarker(data, plot, scale);
@@ -610,6 +629,68 @@ export class ChartEngine {
       ctx.fillText(level.label, plot.x + 6, y - 3);
       ctx.restore();
     }
+  }
+
+  /**
+   * Corporate actions on the time axis.
+   *
+   * Each event is snapped to the nearest bar rather than interpolated, so the
+   * marker sits on the session the drop actually happened in. Events outside
+   * the visible range are skipped, which is why switching to a shorter range
+   * quietly removes them instead of bunching them at the edge.
+   */
+  private drawEvents(data: Candle[], plot: ReturnType<typeof this.plotRect>) {
+    const events = this.options.events;
+    if (!events || events.length === 0 || data.length < 2) return;
+
+    const { ctx } = this;
+    const first = data[0]!.t;
+    const last = data[data.length - 1]!.t;
+    const baseline = plot.y + plot.h;
+
+    ctx.save();
+    for (const event of events) {
+      if (event.t < first || event.t > last) continue;
+
+      // Nearest bar by time. A binary search is overkill for a handful of
+      // events against a few hundred bars.
+      let index = 0;
+      let best = Infinity;
+      for (let i = 0; i < data.length; i++) {
+        const d = Math.abs(data[i]!.t - event.t);
+        if (d < best) {
+          best = d;
+          index = i;
+        }
+      }
+
+      const x = this.snap(this.xAt(index, data.length, plot));
+
+      ctx.strokeStyle = withAlpha(event.color, 0.34);
+      ctx.lineWidth = 1 / this.dpr;
+      ctx.setLineDash([2, 4]);
+      ctx.beginPath();
+      ctx.moveTo(x, plot.y);
+      ctx.lineTo(x, baseline);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // A small filled disc at the foot of the line, with its initial inside.
+      ctx.beginPath();
+      ctx.arc(x, baseline + 1, 6, 0, Math.PI * 2);
+      ctx.fillStyle = event.color;
+      ctx.fill();
+      ctx.strokeStyle = this.palette.surface;
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+
+      ctx.font = '600 8px var(--font-plex-mono), ui-monospace, monospace';
+      ctx.fillStyle = this.palette.surface;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(event.glyph, x, baseline + 1.5);
+    }
+    ctx.restore();
   }
 
   private drawPriceAxis(

@@ -34,7 +34,12 @@ const KIND_LABEL: Record<FlowAlertKind, string> = {
   "dii-sell-above": "Domestic net selling exceeds",
   "combined-buy-above": "Combined net buying exceeds",
   "combined-sell-above": "Combined net selling exceeds",
+  "deal-buy-above": "Any single fund buys more than",
+  "deal-sell-above": "Any single fund sells more than",
 };
+
+/** The two that watch individual trades rather than the daily aggregate. */
+const DEAL_KINDS: FlowAlertKind[] = ["deal-buy-above", "deal-sell-above"];
 
 /**
  * Evaluate one alert against a session.
@@ -42,6 +47,34 @@ const KIND_LABEL: Record<FlowAlertKind, string> = {
  * Net figures are signed, so "selling above X" is a net *below* −X. Comparing
  * the absolute value instead would fire a sell alert on a buying day.
  */
+export interface DealMatch {
+  symbol: string;
+  client: string;
+  side: "BUY" | "SELL" | null;
+  /** Rupees. */
+  value: number | null;
+}
+
+/**
+ * Deal alerts watch individual disclosed trades rather than the daily
+ * aggregate, so they take the session's deal list instead of the flow figures.
+ * Thresholds are in crore to match the flow alerts; deal values arrive in
+ * rupees, hence the conversion.
+ */
+export function evaluateDealAlert(alert: FlowAlert, deals: DealMatch[]): DealMatch | null {
+  if (!DEAL_KINDS.includes(alert.kind)) return null;
+  const wantSide = alert.kind === "deal-buy-above" ? "BUY" : "SELL";
+  const thresholdRupees = alert.threshold * 1e7;
+
+  const matches = deals.filter(
+    (d) => d.side === wantSide && (d.value ?? 0) >= thresholdRupees,
+  );
+  if (matches.length === 0) return null;
+
+  // Report the largest, which is the one worth naming in the alert.
+  return matches.reduce((a, b) => ((b.value ?? 0) > (a.value ?? 0) ? b : a));
+}
+
 export function evaluateFlowAlert(alert: FlowAlert, day: FlowDay): boolean {
   const combined = day.fii.net + day.dii.net;
 
@@ -70,7 +103,16 @@ function currentValue(alert: FlowAlert, day: FlowDay): number {
   return combined;
 }
 
-export function FlowAlertsPanel({ latest }: { latest: FlowDay | null }) {
+export function FlowAlertsPanel({
+  latest,
+  deals = [],
+  dealDate,
+}: {
+  latest: FlowDay | null;
+  /** The session's disclosed trades, for deal-threshold alerts. */
+  deals?: DealMatch[];
+  dealDate?: string;
+}) {
   const { flowAlerts, addFlowAlert, removeFlowAlert, markFlowAlertTriggered, rearmFlowAlert } =
     usePersonal();
 
@@ -86,15 +128,19 @@ export function FlowAlertsPanel({ latest }: { latest: FlowDay | null }) {
    * Wednesday's figures.
    */
   useEffect(() => {
-    if (!latest) return;
     for (const alert of flowAlerts) {
       if (!alert.active) continue;
-      if (alert.triggeredForDate === latest.date) continue;
-      if (evaluateFlowAlert(alert, latest)) {
-        markFlowAlertTriggered(alert.id, latest.date);
+
+      if (DEAL_KINDS.includes(alert.kind)) {
+        if (!dealDate || alert.triggeredForDate === dealDate) continue;
+        if (evaluateDealAlert(alert, deals)) markFlowAlertTriggered(alert.id, dealDate);
+        continue;
       }
+
+      if (!latest || alert.triggeredForDate === latest.date) continue;
+      if (evaluateFlowAlert(alert, latest)) markFlowAlertTriggered(alert.id, latest.date);
     }
-  }, [latest, flowAlerts, markFlowAlertTriggered]);
+  }, [latest, deals, dealDate, flowAlerts, markFlowAlertTriggered]);
 
   const numeric = Number(threshold);
   const valid = Number.isFinite(numeric) && numeric > 0;
@@ -240,7 +286,7 @@ export function FlowAlertsPanel({ latest }: { latest: FlowDay | null }) {
                 </div>
 
                 <div className="flex items-center gap-4">
-                  {value != null && (
+                  {value != null && !DEAL_KINDS.includes(alert.kind) && (
                     <span className="text-right">
                       <span className="label-micro block text-ivory-40">Latest</span>
                       <span

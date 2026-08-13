@@ -8,6 +8,7 @@ import { PageBody, PageHeader } from "@/components/shell/PageHeader";
 import { Badge, Button, EmptyState, Panel, PanelHeader, Segmented, Skeleton } from "@/components/ui/primitives";
 import { IconBriefcase, IconRefresh, IconSearch } from "@/components/ui/icons";
 import { Input } from "@/components/ui/primitives";
+import { FlowAlertsPanel } from "@/components/market/FlowAlerts";
 import { formatCompactMoney, formatDate, formatNumber, formatPrice } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -198,6 +199,20 @@ export function DealsView() {
                 </div>
               </div>
             </Panel>
+
+            {/* Deal thresholds live here rather than on the flows page,
+                because this is where the reader is already thinking in
+                position sizes. */}
+            <FlowAlertsPanel
+              latest={null}
+              dealDate={payload.asOfLabel}
+              deals={payload.data.map((d) => ({
+                symbol: d.symbol,
+                client: d.client,
+                side: d.side,
+                value: d.value,
+              }))}
+            />
 
             <Panel flush>
               <PanelHeader

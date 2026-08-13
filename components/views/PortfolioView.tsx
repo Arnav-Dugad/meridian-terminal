@@ -54,8 +54,11 @@ export function PortfolioView() {
       try {
         const res = await fetch("/api/fx?pair=USD/INR");
         if (!res.ok) return;
-        const body = (await res.json()) as { data: FxRate };
-        if (!cancelled) setFx(body.data);
+        const body = (await res.json()) as { data: FxRate | null };
+        // A null rate is a real answer: no source could supply one. Keeping the
+        // last known value would be better than inventing one, but claiming a
+        // conversion we cannot make would be worse than saying so.
+        if (!cancelled && body.data) setFx(body.data);
       } catch {
         /* keep the last known rate */
       }
@@ -69,10 +72,16 @@ export function PortfolioView() {
   }, []);
 
   const base = preferences.baseCurrency;
-  const rate = fx?.rate ?? 88;
+  // No invented fallback. Until a rate arrives, cross-currency holdings are
+  // not converted and the page says the total is incomplete.
+  const rate = fx?.rate ?? null;
+  const hasForeignHolding = positions.some((p) => p.currency !== base);
+  const conversionMissing = rate == null && hasForeignHolding;
 
   const summary = useMemo(
-    () => valuePortfolio(positions, map, base, rate),
+    // With no rate, only same-currency positions are totalled — the conversion
+    // is skipped rather than guessed, and the banner below says so.
+    () => valuePortfolio(rate == null ? positions.filter((p) => p.currency === base) : positions, map, base, rate ?? 1),
     [positions, map, base, rate],
   );
 
@@ -100,7 +109,7 @@ export function PortfolioView() {
       pnl: summary.pnl,
       baseCurrency: base,
       positionCount: positions.length,
-      fxRate: rate,
+      fxRate: rate ?? 0,
     });
   }, [ready, positions.length, summary.pricedCount, summary.value, summary.cost, summary.pnl, base, rate, recordSnapshot]);
 
@@ -143,7 +152,11 @@ export function PortfolioView() {
       <PageHeader
         eyebrow="Portfolio"
         title="Your book"
-        description={`Marked to the last print, totalled in ${base === "INR" ? "rupees" : "dollars"} at ${rate.toFixed(3)} USD/INR.`}
+        description={
+          rate != null
+            ? `Marked to the last print, totalled in ${base === "INR" ? "rupees" : "dollars"} at ${rate.toFixed(3)} USD/INR.`
+            : `Marked to the last print, totalled in ${base === "INR" ? "rupees" : "dollars"}.`
+        }
         meta={
           <>
             <DataSourceNotice source={source} />
@@ -175,6 +188,17 @@ export function PortfolioView() {
       />
 
       <PageBody className="space-y-5">
+        {conversionMissing && (
+          <Panel className="border-signal/35 bg-signal/[0.05]">
+            <p className="label-micro text-signal">Exchange rate unavailable</p>
+            <p className="mt-2 max-w-[80ch] text-[12px] leading-relaxed text-ivory-60">
+              No source could supply the USD/INR rate just now, so holdings priced in
+              another currency are excluded from the totals below rather than converted at
+              a guessed rate. They reappear as soon as a rate is available.
+            </p>
+          </Panel>
+        )}
+
         {/* Headline figures */}
         <div className="grid gap-px overflow-hidden rounded-md border border-line bg-line sm:grid-cols-2 lg:grid-cols-4">
           <HeadlineCell label="Market value" value={money(summary.value)} sub={`Cost ${money(summary.cost)}`} />

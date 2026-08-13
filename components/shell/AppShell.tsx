@@ -12,6 +12,7 @@ import { useCommandPalette } from "@/components/shell/CommandPalette";
 import { AlertWatcher } from "@/components/shell/AlertWatcher";
 import { ShortcutsOverlay } from "@/components/shell/ShortcutsOverlay";
 import { PreferenceSync } from "@/components/shell/PreferenceSync";
+import { MobileNav } from "@/components/shell/MobileNav";
 import { Glyph } from "@/components/brand/Wordmark";
 import { Tape } from "@/components/market/Tape";
 import { MarketClocks } from "@/components/shell/MarketClocks";
@@ -68,11 +69,11 @@ const NAV = [
 ];
 
 /**
- * The five that earn a permanent slot on a phone. Everything else stays one
- * tap away through the palette, which the topbar keeps visible at all times —
- * better than a cramped eight-item bar where every target is too small.
+ * The four that earn a permanent slot on a phone. Everything else lives in the
+ * "More" sheet — reachable in two taps, rather than only through a keyboard
+ * shortcut on a device with no keyboard.
  */
-const MOBILE_NAV = ["/dashboard", "/markets", "/workspace", "/watchlist", "/portfolio"];
+const MOBILE_PRIMARY = ["/dashboard", "/markets", "/watchlist", "/portfolio"];
 
 const RAIL_KEY = "meridian.rail.collapsed";
 
@@ -106,6 +107,21 @@ export function AppShell({ children }: { children: ReactNode }) {
   const activeAlerts = alerts.filter((a) => a.active).length;
   const tapeSymbols = watchlist.length > 0 ? watchlist.slice(0, 24) : DEFAULT_WATCHLIST;
   const showTape = preferences.showTape;
+
+  // Split the rail into a phone tab bar and the overflow sheet. Settings is
+  // appended to the sheet because it has no place in the rail's main list but
+  // must still be reachable without a keyboard.
+  const withBadges = NAV.map((item) => ({
+    ...item,
+    ...(item.href === "/alerts" && activeAlerts > 0 ? { badge: activeAlerts } : {}),
+  }));
+  const mobilePrimary = MOBILE_PRIMARY.map((href) => withBadges.find((n) => n.href === href)).filter(
+    (n): n is (typeof withBadges)[number] => Boolean(n),
+  );
+  const mobileOverflow = [
+    ...withBadges.filter((n) => !MOBILE_PRIMARY.includes(n.href)),
+    { href: "/settings", label: "Settings", icon: <IconSettings /> },
+  ];
 
   return (
     // `overflow-x-clip` rather than `-hidden`: hidden would make this a scroll
@@ -243,7 +259,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           positioned independently. Two separately-offset fixed bars is how
           they end up overlapping the moment either changes height. */}
       <div className="safe-bottom fixed inset-x-0 bottom-0 z-30">
-        <MobileNav pathname={pathname} activeAlerts={activeAlerts} />
+        <MobileNav
+          pathname={pathname}
+          primary={mobilePrimary}
+          overflow={mobileOverflow}
+        />
         {showTape && (
           <div className="border-t border-line bg-ink-1000/92 backdrop-blur-md">
             <Tape symbols={tapeSymbols} speed={1.15} />
@@ -384,48 +404,3 @@ function AccountMenu() {
   );
 }
 
-/* ── Mobile navigation ────────────────────────────────────────────────────── */
-
-function MobileNav({ pathname, activeAlerts }: { pathname: string; activeAlerts: number }) {
-  const items = MOBILE_NAV.map((href) => NAV.find((n) => n.href === href)).filter(
-    (n): n is (typeof NAV)[number] => Boolean(n),
-  );
-
-  return (
-    <nav
-      className="tap-none flex border-t border-line bg-ink-1000/95 backdrop-blur-md md:hidden"
-      aria-label="Sections"
-    >
-      {items.map((item) => {
-        const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            aria-current={active ? "page" : undefined}
-            // min-h-[52px] keeps every target comfortably past the 44px floor.
-            className={cn(
-              "relative flex min-h-[52px] flex-1 flex-col items-center justify-center gap-1 px-1 py-2 transition-colors",
-              active ? "text-signal" : "text-ivory-40 active:text-ivory-80",
-            )}
-          >
-            {active && (
-              <motion.span
-                layoutId="mobile-active"
-                className="absolute inset-x-3 top-0 h-[2px] rounded-full bg-signal"
-                transition={{ type: "spring", stiffness: 380, damping: 32 }}
-              />
-            )}
-            <span className="relative">
-              {item.icon}
-              {item.href === "/alerts" && activeAlerts > 0 && (
-                <span className="absolute -right-1.5 -top-1 h-1.5 w-1.5 rounded-full bg-signal" />
-              )}
-            </span>
-            <span className="label-micro-tight max-w-full truncate">{item.label}</span>
-          </Link>
-        );
-      })}
-    </nav>
-  );
-}

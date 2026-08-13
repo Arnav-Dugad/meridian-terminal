@@ -30,7 +30,7 @@ export function useSeries(
   const [series, setSeries] = useState<Series | null>(initial ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [source, setSource] = useState<DataSource>(initial?.source ?? "simulated");
+  const [source, setSource] = useState<DataSource>(initial?.source ?? "cached");
   const [nonce, setNonce] = useState(0);
 
   // Seed the cache from the server-rendered series so its range is free.

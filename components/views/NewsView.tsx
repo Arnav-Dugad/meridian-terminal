@@ -50,7 +50,7 @@ export function NewsView() {
         description="Market headlines and company news, routed through to the publisher. Tickers mentioned in a story link straight into the terminal."
         meta={
           <>
-            <DataSourceNotice source={marketFeed.items.length > 0 ? "live" : "simulated"} />
+            <DataSourceNotice source={marketFeed.items.length > 0 ? "live" : "cached"} />
             {watched.length > 0 && <Badge tone="neutral">{watched.length} watched with coverage</Badge>}
           </>
         }

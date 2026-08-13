@@ -12,8 +12,31 @@ import type { Sector } from "@/lib/market/universe";
  * normalisers so the rest of the app can hold a plain, fully-typed value.
  */
 
-/** Where a figure came from. Surfaced in the UI -- never silently mixed. */
-export type DataSource = "live" | "cached" | "simulated";
+/**
+ * Where a figure came from. Surfaced in the UI -- never silently mixed.
+ *
+ * There is deliberately no "simulated" member. Earlier versions filled gaps
+ * with a generated market so the interface always had something to draw; that
+ * is a worse failure than an empty panel, because a plausible wrong number is
+ * indistinguishable from a right one at a glance. When no provider can answer,
+ * the app now says so and shows nothing.
+ */
+export type DataSource = "live" | "cached";
+
+/**
+ * Why an instrument has no data.
+ *
+ * Carried alongside results so the interface can explain a gap specifically —
+ * "the exchange is rate-limiting us" and "this symbol is not covered by your
+ * plan" call for completely different responses from the reader.
+ */
+export interface DataFailure {
+  slug: string;
+  symbol: string;
+  reason: string;
+  /** True when retrying shortly is likely to succeed. */
+  transient: boolean;
+}
 
 export interface Quote {
   symbol: string;

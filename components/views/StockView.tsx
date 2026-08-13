@@ -14,6 +14,9 @@ import { BacktestPanel } from "@/components/market/BacktestPanel";
 import { OptionsPanel } from "@/components/market/OptionsPanel";
 import { DriftPanel } from "@/components/market/DriftPanel";
 import { SeasonalityPanel } from "@/components/market/SeasonalityPanel";
+import { InsiderPanel } from "@/components/market/InsiderPanel";
+import { PeerValuation } from "@/components/market/PeerValuation";
+import { useCorporateActionEvents } from "@/lib/hooks/use-corporate-events";
 import {
   AnalystPanel,
   EarningsPanel,
@@ -72,10 +75,13 @@ export function StockView({
   crossMarket,
   source,
   notice,
+  initialNotice,
 }: {
   slug: string;
   initialQuote: Quote;
   initialSeries: Series;
+  /** Why the server-rendered series is empty, when it is. */
+  initialNotice?: string;
   profile: CompanyProfile | null;
   benchmark: { slug: string; candles: Candle[] } | null;
   crossMarket: { slug: string; candles: Candle[] } | null;
@@ -94,14 +100,19 @@ export function StockView({
 
   const research = useResearch(slug, instrument?.kind === "equity");
 
+  // Dividends and splits marked on the chart, so an ex-date drop explains
+  // itself where the reader actually sees it.
+  const chartEvents = useCorporateActionEvents(slug, instrument?.region === "IN");
+
   // Feeds the command palette's recent list and the dashboard's history.
   const { recordView } = usePersonal();
   useEffect(() => {
     recordView(slug);
   }, [slug, recordView]);
 
-  const { series, loading } = useSeries(slug, range, initialSeries);
+  const { series, loading, error } = useSeries(slug, range, initialSeries);
   const candles = series?.candles ?? initialSeries.candles;
+  const seriesNotice = error ?? initialNotice ?? null;
 
   const currency = quote.currency;
   const exchange = instrument ? EXCHANGES[instrument.exchange] : null;
@@ -302,6 +313,8 @@ export function StockView({
               intraday={isIntraday}
               loading={loading}
               height={chartHeight}
+              events={chartEvents}
+              unavailableReason={seriesNotice}
             />
           </div>
         </Panel>
@@ -501,6 +514,7 @@ export function StockView({
                 loading={research.loading}
               />
               <PeersPanel peers={research.peers} loading={research.loading} />
+              <InsiderPanel slug={slug} currency={currency} />
               <NewsPanel
                 slug={slug}
                 limit={6}
@@ -524,6 +538,18 @@ export function StockView({
                 : 252
           }
         />
+
+        {/* Peer comparison needs both a peer list and fundamentals, so it sits
+            below the research column that supplies them. */}
+        {instrument?.kind === "equity" && research.peers.length > 0 && (
+          <PeerValuation
+            slug={slug}
+            symbol={quote.symbol}
+            peers={research.peers}
+            subject={research.fundamentals}
+            loading={research.loading}
+          />
+        )}
 
         {/* Seasonality is free — it runs on the bars already loaded. It only
             says anything on a long range, and tells you so otherwise. */}

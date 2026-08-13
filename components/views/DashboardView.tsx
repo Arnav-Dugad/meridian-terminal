@@ -65,12 +65,14 @@ export function DashboardView({
         }
         actions={
           <>
-            <div className="hidden items-baseline gap-2 rounded-sm border border-line bg-ink-900 px-3 py-2 sm:flex">
-              <span className="label-micro text-ivory-40">USD/INR</span>
-              <span className="num-mono text-[13px] text-ivory">
-                <AnimatedNumber value={overview.fx.rate} format={(v) => v.toFixed(3)} feel="soft" />
-              </span>
-            </div>
+            {overview.fx && (
+              <div className="hidden items-baseline gap-2 rounded-sm border border-line bg-ink-900 px-3 py-2 sm:flex">
+                <span className="label-micro text-ivory-40">USD/INR</span>
+                <span className="num-mono text-[13px] text-ivory">
+                  <AnimatedNumber value={overview.fx.rate} format={(v) => v.toFixed(3)} feel="soft" />
+                </span>
+              </div>
+            )}
             <Button variant="outline" size="md" icon={<IconRefresh />} onClick={refresh}>
               Refresh
             </Button>

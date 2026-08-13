@@ -2,9 +2,9 @@ import "server-only";
 
 import { cached, peek } from "@/lib/twelvedata/cache";
 import { readCachedQuotes, writeCachedQuotes } from "@/lib/firebase/quote-cache";
-import { simulateFx, simulateQuote, simulateSeries } from "@/lib/twelvedata/simulate";
 import * as registry from "@/lib/providers/registry";
 import { fetchExchangeRate, twelveDataMeta } from "@/lib/providers/twelvedata";
+import { fetchFxRate } from "@/lib/providers/yahoo";
 import type {
   AnalystConsensus,
   EarningsPoint,
@@ -13,6 +13,7 @@ import type {
 } from "@/lib/providers/types";
 import type {
   CompanyProfile,
+  DataFailure,
   DataSource,
   FxRate,
   MarketBreadth,
@@ -47,6 +48,60 @@ export interface Resolved<T> {
   notice?: string;
   /** Provider ids that contributed, for attribution. */
   providers?: string[];
+  /** Instruments no provider could answer for, with the reason why. */
+  failures?: DataFailure[];
+}
+
+/**
+ * Turn whatever a provider chain threw into something a reader can act on.
+ *
+ * The distinction that matters is transient versus structural: a rate limit
+ * clears in a minute and is worth a retry button, while a symbol outside your
+ * plan will never resolve and needs a different answer entirely.
+ */
+function describeFailure(inst: Instrument, err: unknown): DataFailure {
+  const message = err instanceof Error ? err.message : "";
+  const lower = message.toLowerCase();
+
+  if (lower.includes("429") || lower.includes("rate") || lower.includes("budget")) {
+    return {
+      slug: inst.slug,
+      symbol: inst.symbol,
+      reason: "Rate limit reached on every data source that covers this instrument.",
+      transient: true,
+    };
+  }
+  if (lower.includes("plan") || lower.includes("grow") || lower.includes("subscription")) {
+    return {
+      slug: inst.slug,
+      symbol: inst.symbol,
+      reason: "This listing is not included in the current data plan.",
+      transient: false,
+    };
+  }
+  if (lower.includes("timed out") || lower.includes("abort") || lower.includes("504")) {
+    return {
+      slug: inst.slug,
+      symbol: inst.symbol,
+      reason: "The data source timed out.",
+      transient: true,
+    };
+  }
+  if (lower.includes("bot protection") || lower.includes("403")) {
+    return {
+      slug: inst.slug,
+      symbol: inst.symbol,
+      reason: "The exchange is refusing automated requests right now.",
+      transient: true,
+    };
+  }
+
+  return {
+    slug: inst.slug,
+    symbol: inst.symbol,
+    reason: message ? `No data source returned a price (${message.slice(0, 80)}).` : "No data source returned a price.",
+    transient: true,
+  };
 }
 
 /* ── Quotes ───────────────────────────────────────────────────────────────── */
@@ -75,7 +130,7 @@ export async function getQuotes(slugs: string[]): Promise<Resolved<Quote[]>> {
     .map((s) => findBySlug(s))
     .filter((i): i is Instrument => Boolean(i));
 
-  if (instruments.length === 0) return { data: [], source: "simulated" };
+  if (instruments.length === 0) return { data: [], source: "cached" };
 
   /*
    * Three tiers, cheapest first.
@@ -115,6 +170,9 @@ export async function getQuotes(slugs: string[]): Promise<Resolved<Quote[]>> {
     }
   }
 
+  // Retained so a failure can be described specifically rather than generically.
+  let lastError: unknown = null;
+
   if (remaining.length > 0 && registry.configuredProviderCount() > 0) {
     try {
       const result = await registry.fetchQuotes(remaining);
@@ -140,31 +198,44 @@ export async function getQuotes(slugs: string[]): Promise<Resolved<Quote[]>> {
         );
         void writeCachedQuotes(result.quotes, ttl);
       }
-    } catch {
+    } catch (err) {
       // The registry already failed over internally; reaching here means every
-      // provider is down. Fall through to cache, then simulation.
+      // provider is down. Keep the reason so the gap can be explained.
+      lastError = err;
     }
   }
 
-  // Fill any remaining gaps, worst case last.
+  /*
+   * Fill gaps from cache, and *omit* anything still missing.
+   *
+   * Nothing is invented here. An instrument no provider could price is left
+   * out of the result and recorded as a failure, so the interface renders an
+   * explicit gap with a reason rather than a plausible fabricated price the
+   * reader has no way to distinguish from a real one.
+   */
   let degraded = false;
-  const data: Quote[] = instruments.map((inst) => {
+  const data: Quote[] = [];
+  const failures: DataFailure[] = [];
+
+  for (const inst of instruments) {
     const live = fresh.get(inst.slug);
-    if (live) return live;
+    if (live) {
+      data.push(live);
+      continue;
+    }
 
     const lastGood = peek<Quote>(quoteKey(inst));
     if (lastGood) {
       degraded = true;
-      return { ...lastGood.value, source: "cached" as const };
+      data.push({ ...lastGood.value, source: "cached" as const });
+      continue;
     }
 
     degraded = true;
-    return simulateQuote(inst);
-  });
+    failures.push(describeFailure(inst, lastError));
+  }
 
-  const simulatedCount = data.filter((q) => q.source === "simulated").length;
-  const source: DataSource =
-    simulatedCount === data.length ? "simulated" : degraded ? "cached" : "live";
+  const source: DataSource = degraded ? "cached" : "live";
 
   // Attribution is derived from the returned quotes rather than from what this
   // call happened to fetch. A quote served from a fresh cache entry is still
@@ -174,49 +245,30 @@ export async function getQuotes(slugs: string[]): Promise<Resolved<Quote[]>> {
     new Set(data.map((q) => q.provider).filter((p): p is string => Boolean(p))),
   );
 
-  const liveCount = data.filter((q) => q.source === "live").length;
-
   return {
     data,
     source,
     providers,
-    notice: degraded ? degradationNotice(data, simulatedCount, liveCount) : undefined,
+    ...(failures.length > 0 ? { failures } : {}),
+    notice: failures.length > 0 ? unavailableNotice(failures, instruments.length) : undefined,
   };
 }
 
-/**
- * Explains *which* instruments degraded and why, rather than a generic banner.
- * The common real-world case — a Twelve Data plan that does not include the
- * Indian exchanges — is worth naming explicitly, because it looks like a bug
- * and is actually a subscription boundary.
- */
-function degradationNotice(data: Quote[], simulatedCount: number, liveCount: number): string {
-  const simulatedIndia = data.filter((q) => q.source === "simulated" && q.region === "IN");
-  const simulatedOther = data.filter((q) => q.source === "simulated" && q.region !== "IN");
-
-  if (simulatedCount === 0) {
-    return "Some values were served from cache rather than re-fetched.";
+/** One line summarising what could not be priced, and whether to retry. */
+function unavailableNotice(failures: DataFailure[], requested: number): string {
+  if (registry.configuredProviderCount() === 0) {
+    return "No market data provider is configured, so no prices can be shown.";
   }
 
-  // The India-only case is worth naming specifically: it looks like a bug and
-  // is actually a plan boundary, and the fix is different from every other
-  // degradation here.
-  if (simulatedIndia.length > 0 && simulatedOther.length === 0) {
-    return twelveDataMeta.configured
-      ? "Indian listings are simulated. Twelve Data's free tier covers US markets only — NSE and BSE need a paid plan."
-      : "Indian listings are simulated — no TWELVE_DATA_API_KEY configured.";
-  }
+  const transient = failures.filter((f) => f.transient).length;
+  const scope =
+    failures.length === requested
+      ? "No prices could be retrieved"
+      : `${failures.length} of ${requested} instruments could not be priced`;
 
-  if (simulatedCount === data.length) {
-    return registry.configuredProviderCount() === 0
-      ? "Simulated market — no data provider is configured. See the Markets page for which keys unlock what."
-      : "Every provider was rate-limited or unreachable; showing simulated values.";
-  }
-
-  const detail = simulatedIndia.length > 0 && simulatedOther.length > 0 ? " (including Indian listings)" : "";
-  return liveCount > 0
-    ? `${simulatedCount} of ${data.length} instruments are simulated${detail} — the rest are live or cached.`
-    : `${simulatedCount} of ${data.length} instruments are simulated${detail}.`;
+  return transient === failures.length
+    ? `${scope} — the data sources are rate-limited or unreachable. This usually clears within a minute.`
+    : `${scope}. ${failures[0]?.reason ?? ""}`;
 }
 
 /* ── Time series ──────────────────────────────────────────────────────────── */
@@ -240,14 +292,6 @@ export async function getSeries(slug: string, range: RangeKey): Promise<Resolved
     source,
   });
 
-  if (registry.configuredProviderCount() === 0 && inst.kind !== "crypto") {
-    return {
-      data: simulateSeries(inst, range),
-      source: "simulated",
-      notice: "Simulated history — no data provider is configured.",
-    };
-  }
-
   try {
     const { value, stale } = await cached(key, { ttl, maxAge: ttl * 24 }, async () => {
       const result = await registry.fetchSeries(inst, range);
@@ -260,7 +304,7 @@ export async function getSeries(slug: string, range: RangeKey): Promise<Resolved
       source: stale ? "cached" : "live",
       providers: [value.provider],
     };
-  } catch {
+  } catch (err) {
     const lastGood = peek<{ candles: Series["candles"] }>(key);
     if (lastGood && lastGood.value.candles.length > 0) {
       return {
@@ -269,10 +313,15 @@ export async function getSeries(slug: string, range: RangeKey): Promise<Resolved
         notice: "Showing the last successfully retrieved history.",
       };
     }
+
+    // An empty candle array with a stated reason, rather than a fabricated
+    // curve. The chart renders its unavailable state from this.
+    const failure = describeFailure(inst, err);
     return {
-      data: simulateSeries(inst, range),
-      source: "simulated",
-      notice: "History unavailable from every provider; showing a simulated series.",
+      data: wrap([], "cached"),
+      source: "cached",
+      notice: failure.reason,
+      failures: [failure],
     };
   }
 }
@@ -281,7 +330,7 @@ export async function getSeries(slug: string, range: RangeKey): Promise<Resolved
 
 export async function getNews(slug: string | null, limit = 20): Promise<Resolved<NewsItem[]>> {
   const inst = (slug ? findBySlug(slug) : null) ?? null;
-  if (slug && !inst) return { data: [], source: "simulated" };
+  if (slug && !inst) return { data: [], source: "cached" };
 
   const key = `news:${inst?.slug ?? "market"}`;
   try {
@@ -299,17 +348,17 @@ export async function getNews(slug: string | null, limit = 20): Promise<Resolved
   } catch {
     return {
       data: [],
-      source: "simulated",
+      source: "cached",
       notice: inst && inst.region !== "US"
-        ? "Company news is only available for US listings on the free tiers in use."
-        : "No news provider is configured. Add FINNHUB_API_KEY to enable this panel.",
+        ? "Company news is only available for US listings on the data sources in use."
+        : "No news source is currently reachable.",
     };
   }
 }
 
 export async function getFundamentals(slug: string): Promise<Resolved<Fundamentals | null>> {
   const inst = findBySlug(slug);
-  if (!inst || inst.kind !== "equity") return { data: null, source: "simulated" };
+  if (!inst || inst.kind !== "equity") return { data: null, source: "cached" };
 
   try {
     // Fundamentals change quarterly. A day is conservative.
@@ -324,13 +373,13 @@ export async function getFundamentals(slug: string): Promise<Resolved<Fundamenta
     );
     return { data: value, source: stale ? "cached" : "live", providers: [value.provider] };
   } catch {
-    return { data: null, source: "simulated" };
+    return { data: null, source: "cached" };
   }
 }
 
 export async function getRecommendations(slug: string): Promise<Resolved<AnalystConsensus | null>> {
   const inst = findBySlug(slug);
-  if (!inst || inst.kind !== "equity") return { data: null, source: "simulated" };
+  if (!inst || inst.kind !== "equity") return { data: null, source: "cached" };
 
   try {
     const { value, stale } = await cached(
@@ -344,13 +393,13 @@ export async function getRecommendations(slug: string): Promise<Resolved<Analyst
     );
     return { data: value, source: stale ? "cached" : "live", providers: [value.provider] };
   } catch {
-    return { data: null, source: "simulated" };
+    return { data: null, source: "cached" };
   }
 }
 
 export async function getEarnings(slug: string): Promise<Resolved<EarningsPoint[]>> {
   const inst = findBySlug(slug);
-  if (!inst || inst.kind !== "equity") return { data: [], source: "simulated" };
+  if (!inst || inst.kind !== "equity") return { data: [], source: "cached" };
 
   try {
     const { value, stale } = await cached(
@@ -364,13 +413,13 @@ export async function getEarnings(slug: string): Promise<Resolved<EarningsPoint[
     );
     return { data: value, source: stale ? "cached" : "live" };
   } catch {
-    return { data: [], source: "simulated" };
+    return { data: [], source: "cached" };
   }
 }
 
 export async function getPeers(slug: string): Promise<Resolved<string[]>> {
   const inst = findBySlug(slug);
-  if (!inst || inst.kind !== "equity") return { data: [], source: "simulated" };
+  if (!inst || inst.kind !== "equity") return { data: [], source: "cached" };
 
   try {
     const { value } = await cached(`peers:${inst.slug}`, { ttl: 604_800_000 }, async () => {
@@ -380,7 +429,7 @@ export async function getPeers(slug: string): Promise<Resolved<string[]>> {
     });
     return { data: value, source: "live" };
   } catch {
-    return { data: [], source: "simulated" };
+    return { data: [], source: "cached" };
   }
 }
 
@@ -388,10 +437,10 @@ export async function getPeers(slug: string): Promise<Resolved<string[]>> {
 
 export async function getProfile(slug: string): Promise<Resolved<CompanyProfile | null>> {
   const inst = findBySlug(slug);
-  if (!inst || inst.kind !== "equity") return { data: null, source: "simulated" };
+  if (!inst || inst.kind !== "equity") return { data: null, source: "cached" };
 
   const { data: fundamentals } = await getFundamentals(slug);
-  if (!fundamentals) return { data: null, source: "simulated" };
+  if (!fundamentals) return { data: null, source: "cached" };
 
   return {
     data: {
@@ -414,30 +463,43 @@ export async function getProfile(slug: string): Promise<Resolved<CompanyProfile 
 
 /* ── FX ───────────────────────────────────────────────────────────────────── */
 
-export async function getFx(pair = "USD/INR"): Promise<Resolved<FxRate>> {
-  const fallback = (): Resolved<FxRate> => ({
-    data: { pair, rate: simulateFx(pair), timestamp: Date.now(), source: "simulated" },
-    source: "simulated",
-  });
-
-  if (!twelveDataMeta.configured) return fallback();
-
+/**
+ * The exchange rate.
+ *
+ * Two independent sources, because this is the denominator of every portfolio
+ * total and a missing rate would blank the entire page. Yahoo's `USDINR=X` is
+ * free and unmetered; Twelve Data is the fallback where a key exists.
+ *
+ * `rate` is null when neither answers, and the portfolio renders native
+ * currencies separately rather than inventing a conversion.
+ */
+export async function getFx(pair = "USD/INR"): Promise<Resolved<FxRate | null>> {
   try {
     const { value, stale } = await cached(
       `fx:${pair}`,
-      { ttl: 300_000, maxAge: 3_600_000 },
+      { ttl: 300_000, maxAge: 21_600_000 },
       async () => {
-        const rate = await fetchExchangeRate(pair);
-        if (rate == null) throw new Error("no rate");
-        return rate;
+        const viaYahoo = await fetchFxRate(pair);
+        if (viaYahoo != null) return viaYahoo;
+
+        if (twelveDataMeta.configured) {
+          const viaTwelve = await fetchExchangeRate(pair);
+          if (viaTwelve != null) return viaTwelve;
+        }
+        throw new Error("no exchange rate available");
       },
     );
+
     return {
       data: { pair, rate: value, timestamp: Date.now(), source: stale ? "cached" : "live" },
       source: stale ? "cached" : "live",
     };
   } catch {
-    return fallback();
+    return {
+      data: null,
+      source: "cached",
+      notice: `No source could provide the ${pair} rate. Totals are shown in each holding's own currency.`,
+    };
   }
 }
 

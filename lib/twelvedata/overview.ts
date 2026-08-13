@@ -28,7 +28,8 @@ export interface OverviewPayload {
   movers: { gainers: Quote[]; losers: Quote[]; active: Quote[] };
   breadth: { IN: MarketBreadth; US: MarketBreadth };
   sectors: { IN: SectorAggregate[]; US: SectorAggregate[] };
-  fx: FxRate;
+  /** Null when no source could supply the rate. */
+  fx: FxRate | null;
   news: NewsItem[];
   sessions: ReturnType<typeof marketStatusSnapshot>;
   asOf: number;
@@ -86,11 +87,7 @@ export async function getOverview(): Promise<OverviewPayload> {
     .slice(0, 8);
 
   const sources: DataSource[] = [indexRes.source, usRes.source, inRes.source];
-  const source: DataSource = sources.every((s) => s === "live")
-    ? "live"
-    : sources.some((s) => s === "live" || s === "cached")
-      ? "cached"
-      : "simulated";
+  const source: DataSource = sources.every((s) => s === "live") ? "live" : "cached";
 
   const providers = Array.from(
     new Set([

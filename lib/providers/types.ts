@@ -107,9 +107,22 @@ export interface ProviderMeta {
   envVar: string | null;
 }
 
+export interface InsiderTradeShape {
+  name: string;
+  shares: number;
+  direction: "buy" | "sell";
+  openMarket: boolean;
+  code: string | null;
+  price: number | null;
+  value: number | null;
+  filedAt: number | null;
+  transactedAt: number | null;
+}
+
 export interface QuoteProvider {
   readonly meta: ProviderMeta;
   fetchQuotes?(instruments: Instrument[]): Promise<Quote[]>;
+  fetchInsiderTransactions?(instrument: Instrument): Promise<InsiderTradeShape[]>;
   fetchSeries?(instrument: Instrument, range: RangeKey): Promise<Candle[]>;
   fetchProfileExtras?(instrument: Instrument): Promise<Partial<Fundamentals> | null>;
   fetchNews?(instrument: Instrument | null, limit: number): Promise<NewsItem[]>;

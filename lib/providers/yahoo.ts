@@ -261,6 +261,24 @@ function normalise(result: ChartResult, inst: Instrument): Quote | null {
 }
 
 /**
+ * Exchange rates.
+ *
+ * Yahoo quotes currency pairs as `USDINR=X` on the same chart endpoint used
+ * for equities, which means the portfolio's conversion rate needs no key and
+ * no separate budget. This is the primary FX source; Twelve Data is the
+ * fallback where a key exists.
+ */
+export async function fetchFxRate(pair: string): Promise<number | null> {
+  const symbol = `${pair.replace("/", "").toUpperCase()}=X`;
+  try {
+    const result = await fetchChart(symbol, "1d", "1d");
+    return num(result?.meta?.regularMarketPrice);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Yahoo takes an interval and a lookback rather than a bar count, and rejects
  * combinations it will not serve (intraday beyond 60 days, for instance).
  */

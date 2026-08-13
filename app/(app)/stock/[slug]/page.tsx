@@ -64,6 +64,7 @@ export default async function StockPage({ params }: PageProps) {
       crossMarket={crossRes ? { slug: crossSlug, candles: crossRes.data.candles } : null}
       source={quoteRes.source}
       notice={quoteRes.notice}
+      initialNotice={seriesRes.notice}
     />
   );
 }

@@ -199,6 +199,8 @@ export function EarningsView() {
           ))
         )}
 
+        <IpoPanel />
+
         <p className="max-w-[80ch] text-[11px] leading-relaxed text-ivory-40">
           Dates are as published and do move. Indian coverage spans the largest listed
           names; US coverage is the full exchange calendar.
@@ -276,6 +278,127 @@ function EarningsRow({ entry, watched }: { entry: CalendarEntry; watched: boolea
         body
       )}
     </li>
+  );
+}
+
+/* ── New listings ─────────────────────────────────────────────────────────── */
+
+interface IpoEntry {
+  symbol: string | null;
+  name: string;
+  exchange: string | null;
+  date: string;
+  status: string | null;
+  shares: number | null;
+  priceRange: string | null;
+  totalValue: number | null;
+}
+
+/**
+ * The IPO calendar.
+ *
+ * Companies about to start trading are the one part of the market with no
+ * price history to look at, which is exactly where a calendar earns its place.
+ */
+function IpoPanel() {
+  const [entries, setEntries] = useState<IpoEntry[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch("/api/insiders", { signal: controller.signal });
+        const body = (await res.json()) as { data: IpoEntry[]; notice?: string };
+        if (cancelled) return;
+        setEntries(body.data);
+        setNotice(body.notice ?? null);
+      } catch (err) {
+        if (cancelled || (err instanceof Error && err.name === "AbortError")) return;
+        setNotice("The listings calendar could not be loaded.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, []);
+
+  const upcoming = entries.filter((e) => e.status !== "withdrawn").slice(0, 12);
+
+  return (
+    <Panel flush>
+      <PanelHeader
+        title="New listings"
+        subtitle="Companies about to start trading"
+        action={upcoming.length > 0 ? <Badge tone="neutral">{upcoming.length}</Badge> : undefined}
+      />
+
+      {loading ? (
+        <div className="space-y-3 p-4">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-9 w-full" />
+          ))}
+        </div>
+      ) : upcoming.length === 0 ? (
+        <EmptyState
+          title="No listings scheduled"
+          description={notice ?? "Nothing is scheduled to list in the coming weeks."}
+        />
+      ) : (
+        <ul className="divide-y divide-line/60">
+          {upcoming.map((e, i) => (
+            <motion.li
+              key={`${e.name}-${e.date}-${i}`}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.28, delay: Math.min(i * 0.03, 0.25) }}
+              className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 hover:bg-ink-850"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="flex flex-wrap items-center gap-2">
+                  {e.symbol && (
+                    <span className="num-mono text-[12px] text-ivory">{e.symbol}</span>
+                  )}
+                  <span className="max-w-[34ch] truncate text-[12px] text-ivory-80">{e.name}</span>
+                  {e.status && (
+                    <Badge tone={e.status === "priced" ? "up" : "neutral"}>{e.status}</Badge>
+                  )}
+                </p>
+                <p className="mt-0.5 text-[10px] text-ivory-40">
+                  {e.exchange ?? "—"} · {formatDate(e.date)}
+                </p>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-5 text-right">
+                {e.priceRange && (
+                  <span>
+                    <span className="label-micro block text-ivory-40">Price</span>
+                    <span className="num-mono mt-0.5 block text-[11px] text-ivory">
+                      {e.priceRange}
+                    </span>
+                  </span>
+                )}
+                {e.totalValue != null && e.totalValue > 0 && (
+                  <span className="hidden sm:block">
+                    <span className="label-micro block text-ivory-40">Raising</span>
+                    <span className="num-mono mt-0.5 block text-[11px] text-ivory-60">
+                      {formatCompactMoney(e.totalValue, "USD")}
+                    </span>
+                  </span>
+                )}
+              </div>
+            </motion.li>
+          ))}
+        </ul>
+      )}
+    </Panel>
   );
 }
 

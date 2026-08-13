@@ -52,7 +52,7 @@ const MAX_STREAM_SYMBOLS = 40;
 
 export function MarketDataProvider({ children }: { children: ReactNode }) {
   const [quotes, setQuotes] = useState<Map<string, Quote>>(() => new Map());
-  const [source, setSource] = useState<DataSource>("simulated");
+  const [source, setSource] = useState<DataSource>("cached");
   const [updatedAt, setUpdatedAt] = useState(0);
   const [connected, setConnected] = useState(false);
 

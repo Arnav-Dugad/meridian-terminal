@@ -8,6 +8,7 @@ import { twelveData } from "@/lib/providers/twelvedata";
 import { yahoo } from "@/lib/providers/yahoo";
 import { yahooSummary } from "@/lib/providers/yahoo-summary";
 import { canSpend, limiterSnapshot } from "@/lib/providers/limiter";
+import { breakerSnapshot, canAttempt, recordFailure, recordSuccess } from "@/lib/providers/breaker";
 import type {
   AnalystConsensus,
   Capability,
@@ -122,7 +123,11 @@ function chainFor(capability: Capability, inst: Instrument): QuoteProvider[] {
 
 /**
  * Try each provider in turn, returning the first non-empty result.
- * A provider that is out of budget is skipped without a request.
+ *
+ * Two things are checked before a request is made at all: whether the budget
+ * allows it, and whether the circuit breaker is open. Both are local lookups,
+ * so a chain of five providers where four are dead costs one request rather
+ * than four timeouts plus one.
  */
 async function firstOf<T>(
   chain: QuoteProvider[],
@@ -131,13 +136,20 @@ async function firstOf<T>(
   isEmpty: (v: T) => boolean,
 ): Promise<{ value: T; provider: string } | null> {
   for (const provider of chain) {
-    if (!canSpend(provider.meta.id, cost)) continue;
+    const id = provider.meta.id;
+    if (!canSpend(id, cost)) continue;
+    if (!canAttempt(id)) continue;
+
     try {
       const value = await run(provider);
       if (value != null && !isEmpty(value)) {
-        return { value, provider: provider.meta.id };
+        recordSuccess(id);
+        return { value, provider: id };
       }
-    } catch {
+      // An empty-but-successful response still proves the provider is up.
+      recordSuccess(id);
+    } catch (err) {
+      recordFailure(id, err);
       // Every provider error is a failover signal; the chain is the recovery.
     }
   }
@@ -180,16 +192,26 @@ export async function fetchQuotes(instruments: Instrument[]): Promise<QuoteResul
     for (const provider of chain) {
       if (remaining.length === 0) break;
       if (!provider.fetchQuotes) continue;
-      if (!canSpend(provider.meta.id, 1)) continue;
+
+      const id = provider.meta.id;
+      if (!canSpend(id, 1)) continue;
+      // Skip a provider the breaker has opened — no request, no timeout.
+      if (!canAttempt(id)) continue;
 
       try {
         const quotes = await provider.fetchQuotes(remaining);
         for (const q of quotes) found.set(q.slug, q);
-        if (quotes.length > 0) providers.add(provider.meta.id);
+        if (quotes.length > 0) providers.add(id);
         const got = new Set(quotes.map((q) => q.slug));
         remaining = remaining.filter((i) => !got.has(i.slug));
-      } catch {
-        // Next provider in the chain.
+
+        // Returning nothing for every requested symbol is a failure even
+        // without an exception — a provider answering 200 with an empty body
+        // is still not serving data.
+        if (quotes.length === 0) recordFailure(id, new Error("returned no quotes"));
+        else recordSuccess(id);
+      } catch (err) {
+        recordFailure(id, err);
       }
     }
   };
@@ -329,21 +351,39 @@ export interface ProviderStatusRow {
   capabilities: Capability[];
   coverage: string[];
   budget: { minute: number | null; day: number | null };
+  /** Breaker state, so a provider being skipped is visible rather than silent. */
+  circuit: {
+    state: "closed" | "open" | "half-open";
+    retryInSeconds: number;
+    lastError: string | null;
+  };
 }
 
-/** Powers /api/health and the attribution footer. */
+/** Powers /api/health and the diagnostics page. */
 export function providerStatus(): ProviderStatusRow[] {
   const budgets = limiterSnapshot();
-  return ALL_PROVIDERS.map((p) => ({
-    id: p.meta.id,
-    label: p.meta.label,
-    homepage: p.meta.homepage,
-    configured: p.meta.configured,
-    envVar: p.meta.envVar,
-    capabilities: p.meta.capabilities,
-    coverage: p.meta.coverage,
-    budget: budgets[p.meta.id] ?? { minute: null, day: null },
-  }));
+  const breakers = new Map(breakerSnapshot().map((b) => [b.provider, b]));
+
+  return ALL_PROVIDERS.map((p) => {
+    const breaker = breakers.get(p.meta.id);
+    return {
+      id: p.meta.id,
+      label: p.meta.label,
+      homepage: p.meta.homepage,
+      configured: p.meta.configured,
+      envVar: p.meta.envVar,
+      capabilities: p.meta.capabilities,
+      coverage: p.meta.coverage,
+      budget: budgets[p.meta.id] ?? { minute: null, day: null },
+      circuit: breaker
+        ? {
+            state: breaker.state,
+            retryInSeconds: breaker.retryInSeconds,
+            lastError: breaker.lastError,
+          }
+        : { state: "closed" as const, retryInSeconds: 0, lastError: null },
+    };
+  });
 }
 
 export function configuredProviderCount(): number {

@@ -8,6 +8,7 @@ import { IndexStrip } from "@/components/market/IndexStrip";
 import { PageBody, PageHeader } from "@/components/shell/PageHeader";
 import { BreadthMeter } from "@/components/market/BreadthMeter";
 import { SectorRotation } from "@/components/market/SectorRotation";
+import { RotationQuadrant } from "@/components/market/RotationQuadrant";
 import { SessionDial } from "@/components/market/SessionDial";
 import { QuoteTable } from "@/components/market/QuoteTable";
 import { DataSourceNotice } from "@/components/market/DataSourceNotice";
@@ -53,12 +54,14 @@ export function MarketsView({
           </>
         }
         actions={
-          <div className="flex items-baseline gap-2 rounded-sm border border-line bg-ink-900 px-3 py-2">
-            <span className="label-micro text-ivory-40">USD/INR</span>
-            <span className="num-mono text-[13px] text-ivory">
-              <AnimatedNumber value={overview.fx.rate} format={(v) => v.toFixed(3)} feel="soft" />
-            </span>
-          </div>
+          overview.fx ? (
+            <div className="flex items-baseline gap-2 rounded-sm border border-line bg-ink-900 px-3 py-2">
+              <span className="label-micro text-ivory-40">USD/INR</span>
+              <span className="num-mono text-[13px] text-ivory">
+                <AnimatedNumber value={overview.fx.rate} format={(v) => v.toFixed(3)} feel="soft" />
+              </span>
+            </div>
+          ) : undefined
         }
       />
 
@@ -93,6 +96,16 @@ export function MarketsView({
             </Panel>
           </div>
         </div>
+
+        {/* Rotation quadrant — which sectors lead, and which are becoming
+            leaders. Uses figures already computed for the panel above. */}
+        <RotationQuadrant
+          sectors={region === "US" ? overview.sectors.US : overview.sectors.IN}
+          marketChange={
+            region === "US" ? overview.breadth.US.weightedChange : overview.breadth.IN.weightedChange
+          }
+          regionLabel={region === "US" ? "United States" : "India"}
+        />
 
         <Panel flush>
           <PanelHeader
