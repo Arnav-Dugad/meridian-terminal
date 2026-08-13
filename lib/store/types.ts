@@ -123,6 +123,27 @@ export interface PortfolioSnapshot {
   recordedAt: number;
 }
 
+/** One tile in the workspace grid. */
+export interface WorkspacePane {
+  slug: string;
+  range: RangeKey;
+  style: "candles" | "area";
+}
+
+/**
+ * A saved arrangement of up to four instruments.
+ *
+ * The point of a workspace is that it is *the same* every time you open it —
+ * so it stores the exact panes, not a query that might resolve differently.
+ */
+export interface Workspace {
+  id: string;
+  name: string;
+  panes: WorkspacePane[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface PersonalState {
   watchlist: string[];
   positions: Position[];
@@ -133,6 +154,7 @@ export interface PersonalState {
   notes: InstrumentNote[];
   savedScreens: SavedScreen[];
   snapshots: PortfolioSnapshot[];
+  workspaces: Workspace[];
 }
 
 export const EMPTY_PERSONAL: PersonalState = {
@@ -144,6 +166,7 @@ export const EMPTY_PERSONAL: PersonalState = {
   notes: [],
   savedScreens: [],
   snapshots: [],
+  workspaces: [],
 };
 
 /** Caps, enforced on write so a document cannot grow without bound. */
@@ -153,6 +176,9 @@ export const LIMITS = {
   savedScreens: 30,
   /** Roughly two years of daily points. */
   snapshots: 730,
+  workspaces: 12,
+  /** Panes per workspace — the grid is 2×2. */
+  panes: 4,
 } as const;
 
 /** Where the current personal data is being persisted. */

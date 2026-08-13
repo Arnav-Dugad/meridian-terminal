@@ -26,6 +26,8 @@ import type {
   PriceAlert,
   SavedScreen,
   StorageMode,
+  Workspace,
+  WorkspacePane,
 } from "@/lib/store/types";
 import { DEFAULT_WATCHLIST, findBySlug } from "@/lib/market/universe";
 
@@ -88,6 +90,9 @@ interface PersonalContextValue extends PersonalState {
   removeScreen: (id: string) => void;
 
   recordSnapshot: (snapshot: Omit<PortfolioSnapshot, "recordedAt">) => void;
+
+  saveWorkspace: (name: string, panes: WorkspacePane[], id?: string) => string;
+  removeWorkspace: (id: string) => void;
 }
 
 const PersonalContext = createContext<PersonalContextValue | null>(null);
@@ -181,7 +186,59 @@ function coerceState(raw: unknown): PersonalState {
         .sort((a, b) => a.date.localeCompare(b.date))
     : [];
 
-  return { watchlist, positions, alerts, preferences, recentlyViewed, notes, savedScreens, snapshots };
+  const workspaces = Array.isArray(r["workspaces"])
+    ? (r["workspaces"] as unknown[]).flatMap((w) => {
+        const ws = coerceWorkspace(w);
+        return ws ? [ws] : [];
+      })
+    : [];
+
+  return {
+    watchlist,
+    positions,
+    alerts,
+    preferences,
+    recentlyViewed,
+    notes,
+    savedScreens,
+    snapshots,
+    workspaces,
+  };
+}
+
+function coerceWorkspace(w: unknown): Workspace | null {
+  if (typeof w !== "object" || w === null) return null;
+  const r = w as Record<string, unknown>;
+  const name = typeof r["name"] === "string" ? r["name"].slice(0, 48) : null;
+  if (!name) return null;
+
+  const panes = Array.isArray(r["panes"])
+    ? (r["panes"] as unknown[])
+        .flatMap((p) => {
+          if (typeof p !== "object" || p === null) return [];
+          const pr = p as Record<string, unknown>;
+          const inst = typeof pr["slug"] === "string" ? findBySlug(pr["slug"]) : undefined;
+          if (!inst) return [];
+          return [
+            {
+              slug: inst.slug,
+              range: (typeof pr["range"] === "string" ? pr["range"] : "6M") as WorkspacePane["range"],
+              style: pr["style"] === "candles" ? ("candles" as const) : ("area" as const),
+            },
+          ];
+        })
+        .slice(0, LIMITS.panes)
+    : [];
+
+  if (panes.length === 0) return null;
+
+  return {
+    id: typeof r["id"] === "string" ? r["id"] : makeId("ws"),
+    name,
+    panes,
+    createdAt: Number(r["createdAt"]) || Date.now(),
+    updatedAt: Number(r["updatedAt"]) || Date.now(),
+  };
 }
 
 function coerceNote(n: unknown): InstrumentNote | null {
@@ -627,6 +684,40 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
     [mutate],
   );
 
+  /**
+   * Create or update a workspace. Returns the id either way, so the caller can
+   * keep pointing at the layout it just saved without a round trip through
+   * state.
+   */
+  const saveWorkspace = useCallback<PersonalContextValue["saveWorkspace"]>(
+    (name, panes, id) => {
+      const trimmed = name.trim().slice(0, 48) || "Untitled layout";
+      const valid = panes.filter((p) => findBySlug(p.slug)).slice(0, LIMITS.panes);
+      const workspaceId = id ?? makeId("ws");
+
+      mutate((p) => {
+        const existing = p.workspaces.find((w) => w.id === workspaceId);
+        const next: Workspace = {
+          id: workspaceId,
+          name: trimmed,
+          panes: valid,
+          createdAt: existing?.createdAt ?? Date.now(),
+          updatedAt: Date.now(),
+        };
+        const without = p.workspaces.filter((w) => w.id !== workspaceId);
+        return { ...p, workspaces: [next, ...without].slice(0, LIMITS.workspaces) };
+      });
+
+      return workspaceId;
+    },
+    [mutate],
+  );
+
+  const removeWorkspace = useCallback(
+    (id: string) => mutate((p) => ({ ...p, workspaces: p.workspaces.filter((w) => w.id !== id) })),
+    [mutate],
+  );
+
   const value = useMemo<PersonalContextValue>(
     () => ({
       ...state,
@@ -654,12 +745,14 @@ export function PersonalProvider({ children }: { children: ReactNode }) {
       saveScreen,
       removeScreen,
       recordSnapshot,
+      saveWorkspace,
+      removeWorkspace,
     }),
     [
       state, ready, mode, migrated, isWatched, toggleWatch, addToWatchlist, removeFromWatchlist,
       reorderWatchlist, addPosition, updatePosition, removePosition, addAlert, updateAlert,
       removeAlert, markAlertTriggered, setPreference, resetAll, recordView, noteFor, saveNote,
-      removeNote, saveScreen, removeScreen, recordSnapshot,
+      removeNote, saveScreen, removeScreen, recordSnapshot, saveWorkspace, removeWorkspace,
     ],
   );
 
@@ -707,6 +800,7 @@ function mergeState(remote: PersonalState, local: PersonalState): PersonalState 
     snapshots: [...remote.snapshots, ...local.snapshots.filter((s) => !seenDates.has(s.date))]
       .sort((a, b) => a.date.localeCompare(b.date))
       .slice(-LIMITS.snapshots),
+    workspaces: [...remote.workspaces, ...local.workspaces].slice(0, LIMITS.workspaces),
   };
 }
 

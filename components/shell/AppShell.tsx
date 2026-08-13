@@ -18,11 +18,14 @@ import { MarketClocks } from "@/components/shell/MarketClocks";
 import { Badge, Button, StatusDot } from "@/components/ui/primitives";
 import { DEFAULT_WATCHLIST } from "@/lib/market/universe";
 import {
+  IconActivity,
   IconBell,
   IconBriefcase,
   IconChevronDown,
+  IconClock,
   IconFilter,
   IconGlobe,
+  IconLayers,
   IconLogout,
   IconNews,
   IconPulse,
@@ -49,10 +52,12 @@ import {
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: <IconPulse /> },
+  { href: "/workspace", label: "Workspace", icon: <IconLayers /> },
   { href: "/markets", label: "Markets", icon: <IconGlobe /> },
   { href: "/screener", label: "Screener", icon: <IconFilter /> },
   { href: "/compare", label: "Compare", icon: <IconScale /> },
-  { href: "/flows", label: "Flows", icon: <IconScale /> },
+  { href: "/flows", label: "Flows", icon: <IconActivity /> },
+  { href: "/earnings", label: "Earnings", icon: <IconClock /> },
   { href: "/news", label: "Newsroom", icon: <IconNews /> },
   { href: "/watchlist", label: "Watchlist", icon: <IconStar /> },
   { href: "/portfolio", label: "Portfolio", icon: <IconBriefcase /> },
@@ -64,7 +69,7 @@ const NAV = [
  * tap away through the palette, which the topbar keeps visible at all times —
  * better than a cramped eight-item bar where every target is too small.
  */
-const MOBILE_NAV = ["/dashboard", "/markets", "/watchlist", "/portfolio", "/alerts"];
+const MOBILE_NAV = ["/dashboard", "/markets", "/workspace", "/watchlist", "/portfolio"];
 
 const RAIL_KEY = "meridian.rail.collapsed";
 

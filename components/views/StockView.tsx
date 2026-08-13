@@ -12,6 +12,7 @@ import { NewsPanel } from "@/components/market/NewsFeed";
 import { InstrumentNotes } from "@/components/market/InstrumentNotes";
 import { BacktestPanel } from "@/components/market/BacktestPanel";
 import { OptionsPanel } from "@/components/market/OptionsPanel";
+import { DriftPanel } from "@/components/market/DriftPanel";
 import {
   AnalystPanel,
   EarningsPanel,
@@ -480,12 +481,15 @@ export function StockView({
                 currency={currency}
                 loading={research.loading}
                 unavailableReason={
-                  instrument.region !== "US"
-                    ? "Fundamentals come from Financial Modeling Prep and Finnhub, whose free tiers cover US listings. Indian listings are not included."
-                    : undefined
+                  "No fundamentals are published for this listing. This is unusual for a large-cap name — try again shortly."
                 }
               />
               <EarningsPanel earnings={research.earnings} loading={research.loading} />
+              <DriftPanel
+                earnings={research.earnings}
+                candles={candles}
+                loading={research.loading}
+              />
             </div>
 
             <div className="min-w-0 space-y-5">

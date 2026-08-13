@@ -20,6 +20,7 @@ import {
   IconBell,
   IconBriefcase,
   IconChart,
+  IconClock,
   IconCoin,
   IconFilter,
   IconGlobe,
@@ -74,7 +75,9 @@ const NAV_COMMANDS: NavCommand[] = [
   { id: "news", label: "Newsroom", hint: "Market and company headlines", href: "/news", icon: <IconNews />, keywords: "news headlines press articles" },
   { id: "watchlist", label: "Watchlist", hint: "Your tracked instruments", href: "/watchlist", icon: <IconStar />, keywords: "saved favourites starred" },
   { id: "portfolio", label: "Portfolio", hint: "Holdings, P&L and risk", href: "/portfolio", icon: <IconBriefcase />, keywords: "holdings positions pnl profit returns" },
+  { id: "workspace", label: "Workspace", hint: "Four charts on one screen, saved as layouts", href: "/workspace", icon: <IconLayers />, keywords: "layout panes multi split grid charts" },
   { id: "flows", label: "Institutional flows", hint: "What foreign and domestic money did today", href: "/flows", icon: <IconScale />, keywords: "fii dii foreign domestic institutions india buying selling" },
+  { id: "earnings", label: "Earnings calendar", hint: "Who reports, and when", href: "/earnings", icon: <IconClock />, keywords: "results quarterly report calendar eps" },
   { id: "alerts", label: "Alerts", hint: "Price triggers", href: "/alerts", icon: <IconBell />, keywords: "notifications triggers price" },
   { id: "settings", label: "Settings", hint: "Theme, currency, charts and your data", href: "/settings", icon: <IconSettings />, keywords: "preferences theme light dark mode account export" },
 ];

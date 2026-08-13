@@ -6,6 +6,7 @@ import { finnhub } from "@/lib/providers/finnhub";
 import { fmp } from "@/lib/providers/fmp";
 import { twelveData } from "@/lib/providers/twelvedata";
 import { yahoo } from "@/lib/providers/yahoo";
+import { yahooSummary } from "@/lib/providers/yahoo-summary";
 import { canSpend, limiterSnapshot } from "@/lib/providers/limiter";
 import type {
   AnalystConsensus,
@@ -43,7 +44,15 @@ import type { Candle, Quote, RangeKey } from "@/lib/twelvedata/types";
  * failover costs no wall time when the answer is knowable up front.
  */
 
-const ALL_PROVIDERS: QuoteProvider[] = [yahoo, finnhub, coingecko, twelveData, fmp, alphaVantage];
+const ALL_PROVIDERS: QuoteProvider[] = [
+  yahoo,
+  yahooSummary,
+  finnhub,
+  coingecko,
+  twelveData,
+  fmp,
+  alphaVantage,
+];
 
 function isConfigured(p: QuoteProvider): boolean {
   return p.meta.configured;
@@ -81,17 +90,27 @@ function chainFor(capability: Capability, inst: Instrument): QuoteProvider[] {
       break;
 
     case "fundamentals":
-      // FMP is richer; Finnhub is the fallback and costs a per-minute call
-      // rather than a scarce daily one.
+      // Yahoo leads because it is the only free source that covers Indian
+      // listings — without it, NSE names have a chart and no research at all.
+      // FMP is richer where it applies; Finnhub backs both up.
+      chain.push(yahooSummary);
       if (inst.region === "US") chain.push(fmp, finnhub);
       break;
 
-    case "news":
     case "recommendations":
+      // Same reason: analyst coverage for NSE exists nowhere else free.
+      chain.push(yahooSummary);
+      if (inst.region === "US") chain.push(finnhub);
+      break;
+
     case "earnings":
+      chain.push(yahooSummary);
+      if (inst.region === "US") chain.push(finnhub, fmp);
+      break;
+
+    case "news":
     case "peers":
       if (inst.region === "US") chain.push(finnhub);
-      if (capability === "earnings" && inst.region === "US") chain.push(fmp);
       break;
 
     default:
@@ -270,7 +289,11 @@ export async function fetchRecommendations(inst: Instrument): Promise<AnalystCon
     chainFor("recommendations", inst),
     1,
     (p) => (p.fetchRecommendations ? p.fetchRecommendations(inst) : Promise.resolve(null)),
-    (v) => v.total === 0,
+    // A consensus with price targets but no published rating breakdown is
+    // still worth showing — insisting on a non-zero count discarded coverage
+    // for most Indian listings, where Yahoo reports targets and a mean rating
+    // without the strong-buy/buy/hold split.
+    (v) => v.total === 0 && v.targetMean == null,
   );
   return result?.value ?? null;
 }
